@@ -103,7 +103,7 @@ M2
 
 ## 関連記事
 
-[CNCをブラウザで動かす：ncvc＆Candleからの完全脱却記]（note記事URL）
+[CNCをブラウザで動かす：ncvc＆Candleからの完全脱却記]（[note記事URL](https://note.com/freezing_dragon/n/n458ccc960970?app_launch=false)）
 
 ## ライセンス
 
