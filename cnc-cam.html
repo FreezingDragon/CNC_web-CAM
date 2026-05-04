@@ -1,0 +1,2061 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CNC CAM — DXF → G-code</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+JP:wght@400;500&display=swap');
+
+:root {
+  --bg0: #0a0c0f;
+  --bg1: #0f1318;
+  --bg2: #161b23;
+  --bg3: #1e252f;
+  --border: #252d38;
+  --border2: #2e3a48;
+  --text: #cdd6e0;
+  --text2: #7a8fa8;
+  --text3: #445568;
+  --green: #3ddc84;
+  --green2: #1a5c37;
+  --blue: #4da6ff;
+  --blue2: #1a3a5c;
+  --amber: #f0a030;
+  --amber2: #4a3010;
+  --red: #ff4f4f;
+  --red2: #4a1010;
+  --accent: #00e5ff;
+  --mono: 'JetBrains Mono', 'Courier New', monospace;
+  --sans: 'Noto Sans JP', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--sans);
+  background: var(--bg0);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: hidden;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── HEADER ─────────────────────────────────── */
+header {
+  background: var(--bg1);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+header .title {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+}
+header .subtitle {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+  letter-spacing: 0.04em;
+}
+.status-badge {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 2px;
+  border: 1px solid var(--border2);
+  color: var(--text3);
+  letter-spacing: 0.04em;
+}
+.status-badge.ready { border-color: var(--green); color: var(--green); }
+.status-badge.warn  { border-color: var(--amber); color: var(--amber); }
+.status-badge.error { border-color: var(--red);   color: var(--red);   }
+
+/* ── MAIN LAYOUT ──────────────────────────── */
+.layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── LEFT PANEL ───────────────────────────── */
+.left {
+  background: var(--bg1);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border2) transparent;
+}
+
+.section {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.section-hd {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--text3);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+/* Drop zone */
+.dropzone {
+  border: 1px dashed var(--border2);
+  border-radius: 4px;
+  padding: 14px 10px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: var(--text2);
+  font-size: 11px;
+}
+.dropzone:hover, .dropzone.over {
+  border-color: var(--blue);
+  color: var(--blue);
+  background: var(--blue2);
+}
+.dropzone input { display: none; }
+.dropzone .dz-icon { font-size: 20px; margin-bottom: 4px; }
+
+/* File info */
+.file-card {
+  display: none;
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  padding: 7px 9px;
+  margin-top: 7px;
+  font-family: var(--mono);
+  font-size: 10px;
+  gap: 4px;
+  flex-direction: column;
+}
+.file-card.show { display: flex; }
+
+/* Params */
+.pg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+.pi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pi.wide { grid-column: span 2; }
+.pi label {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text3);
+  letter-spacing: 0.04em;
+}
+.pi input {
+  background: var(--bg0);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--text);
+  padding: 4px 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  width: 100%;
+  transition: border-color 0.1s;
+}
+.pi input:focus { outline: none; border-color: var(--blue); }
+
+/* Buttons */
+.btn {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: opacity 0.12s, background 0.12s;
+  white-space: nowrap;
+}
+.btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.btn-green  { background: #1c5c34; color: var(--green); border: 1px solid #2a8a4e; }
+.btn-blue   { background: var(--blue2); color: var(--blue); border: 1px solid #2a5a8c; }
+.btn-amber  { background: var(--amber2); color: var(--amber); border: 1px solid #7a5020; }
+.btn-ghost  { background: var(--bg3); color: var(--text2); border: 1px solid var(--border2); }
+.btn:not(:disabled):hover { opacity: 0.8; }
+.btn-row { display: flex; gap: 5px; flex-wrap: wrap; }
+
+/* Validation messages */
+.log {
+  font-family: var(--mono);
+  font-size: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.log-line { padding: 1px 0; }
+.log-line.ok    { color: var(--green); }
+.log-line.warn  { color: var(--amber); }
+.log-line.err   { color: var(--red); }
+.log-line.info  { color: var(--text2); }
+
+/* ── RULE CARDS ───────────────────────────── */
+.rule-card {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-left: 3px solid var(--blue);
+  border-radius: 3px;
+  padding: 8px;
+  margin-bottom: 6px;
+  position: relative;
+}
+.rule-card.disabled {
+  opacity: 0.4;
+  border-left-color: var(--text3);
+}
+.rule-card.hidden-rule {
+  opacity: 0.55;
+  border-left-style: dashed;
+}
+.rule-card-hd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.rule-card-hd .rule-num {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text3);
+  letter-spacing: 0.08em;
+}
+.rule-card-hd .rule-color-btn {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  cursor: pointer;
+  padding: 0;
+  border: none;
+  outline: none;
+  transition: transform 0.1s;
+}
+.rule-card-hd .rule-color-btn:hover {
+  transform: scale(1.15);
+}
+.rule-card-hd .rule-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 3px;
+}
+.rule-card-hd .rule-btn {
+  background: transparent;
+  border: 1px solid var(--border2);
+  color: var(--text3);
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 1px 5px;
+  cursor: pointer;
+  border-radius: 2px;
+  line-height: 1.4;
+}
+.rule-card-hd .rule-btn:hover {
+  border-color: var(--text2);
+  color: var(--text);
+}
+.rule-card-hd .rule-btn.del:hover {
+  border-color: var(--red);
+  color: var(--red);
+}
+.rule-card .pg { gap: 4px; }
+.rule-card .pi label { font-size: 8px; }
+.rule-card .pi input,
+.rule-card .pi select {
+  background: var(--bg0);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--text);
+  padding: 3px 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  width: 100%;
+}
+.rule-card .pi select { cursor: pointer; }
+.rule-card .pi input:focus,
+.rule-card .pi select:focus { outline: none; border-color: var(--blue); }
+.rule-add-btn {
+  width: 100%;
+  background: transparent;
+  border: 1px dashed var(--border2);
+  color: var(--text3);
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 6px;
+  cursor: pointer;
+  border-radius: 3px;
+  letter-spacing: 0.06em;
+}
+.rule-add-btn:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+/* Tab section within rule card */
+.tab-sect {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border2);
+}
+.tab-sect-hd {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 4px;
+}
+.tab-sect-hd label {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text2);
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  user-select: none;
+}
+.tab-sect-hd input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--amber);
+  margin: 0;
+}
+.tab-sect.disabled .pi label,
+.tab-sect.disabled .pi input {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.tab-sect .pg {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+/* ── RIGHT PANEL ──────────────────────────── */
+.right {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg0);
+}
+
+/* Canvas area */
+.canvas-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+}
+canvas#preview {
+  border: 1px solid var(--border);
+  background: #040608;
+  max-width: 100%;
+  max-height: 100%;
+}
+.canvas-hint {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text3);
+  text-align: right;
+  pointer-events: none;
+  letter-spacing: 0.04em;
+}
+
+/* Output area */
+.output {
+  background: var(--bg1);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  height: 220px;
+  flex-shrink: 0;
+}
+.output-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  gap: 0;
+}
+.tab {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 6px 14px;
+  cursor: pointer;
+  color: var(--text3);
+  border-right: 1px solid var(--border);
+  transition: all 0.12s;
+  letter-spacing: 0.04em;
+}
+.tab:hover { color: var(--text2); background: var(--bg2); }
+.tab.active { color: var(--accent); background: var(--bg2); border-bottom: 2px solid var(--accent); margin-bottom: -1px; }
+.output-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  gap: 0;
+}
+textarea.gcode {
+  flex: 1;
+  background: var(--bg0);
+  border: none;
+  color: #5dde94;
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 8px 10px;
+  resize: none;
+  line-height: 1.6;
+}
+textarea.gcode:focus { outline: none; }
+.output-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px;
+  border-left: 1px solid var(--border);
+  justify-content: flex-start;
+}
+
+/* Tooltip info */
+.tip {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text3);
+  line-height: 1.6;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title">■ DXF → G-CODE CAM</div>
+  <div class="subtitle">3018Pro / 3040 &nbsp;|&nbsp; 機械原点=右奥 &nbsp;|&nbsp; GRBL</div>
+  <div class="status-badge" id="hdrBadge">IDLE</div>
+</header>
+
+<div class="layout">
+
+  <!-- ═══ LEFT ═══ -->
+  <div class="left">
+
+    <!-- FILE -->
+    <div class="section">
+      <div class="section-hd">DXF ファイル</div>
+      <div class="dropzone" id="dropzone">
+        <div class="dz-icon">◫</div>
+        <div>ドロップ または クリック</div>
+        <input type="file" id="fileInput" accept=".dxf">
+      </div>
+      <div class="file-card" id="fileCard">
+        <span id="fileCardName" style="color:var(--blue)"></span>
+        <span id="fileCardSize" style="color:var(--text3)"></span>
+      </div>
+    </div>
+
+    <!-- ORIGIN LAYER -->
+    <div class="section">
+      <div class="section-hd">原点レイヤー</div>
+      <div class="pg">
+        <div class="pi wide">
+          <label>原点レイヤー名（CIRCLE/SPLINE）</label>
+          <input type="text" id="layerOrigin" value="ORIGEN">
+        </div>
+      </div>
+    </div>
+
+    <!-- RULES -->
+    <div class="section">
+      <div class="section-hd">レイヤー別ルール</div>
+      <div id="ruleList"></div>
+      <button class="rule-add-btn" id="btnAddRule">+ ルール追加</button>
+    </div>
+
+    <!-- SAFETY -->
+    <div class="section">
+      <div class="section-hd">安全設定</div>
+      <div class="pg">
+        <div class="pi">
+          <label>移動退避高さ (mm)</label>
+          <input type="number" id="zSafe" value="5.0" step="1.0" min="2.0">
+        </div>
+        <div class="pi">
+          <label>終了退避高さ (mm) ★</label>
+          <input type="number" id="zFinal" value="30.0" step="5.0" min="5.0">
+        </div>
+        <div class="pi wide">
+          <label>スケール補正</label>
+          <input type="number" id="scale" value="1.0" step="0.01" min="0.001">
+        </div>
+        <div class="pi wide">
+          <label>SPLINE近似誤差 (mm)</label>
+          <input type="number" id="splineTol" value="0.05" step="0.01" min="0.005" max="1.0">
+        </div>
+      </div>
+      <div style="margin-top:5px" class="tip">★ 終了退避はステップ落ち対策で大きく設定</div>
+    </div>
+
+    <!-- OFFSET -->
+    <div class="section">
+      <div class="section-hd">ワーク配置オフセット</div>
+      <div class="pg">
+        <div class="pi">
+          <label>X オフセット (mm)</label>
+          <input type="number" id="offsetX" value="0.0" step="1.0">
+        </div>
+        <div class="pi">
+          <label>Y オフセット (mm)</label>
+          <input type="number" id="offsetY" value="0.0" step="1.0">
+        </div>
+      </div>
+      <div style="margin-top:5px" class="tip">図形全体をシフト。＋値=機械原点(右奥)方向</div>
+    </div>
+
+    <!-- SPINDLE -->
+    <div class="section">
+      <div class="section-hd">スピンドル</div>
+      <div class="pg">
+        <div class="pi">
+          <label>回転数 S値</label>
+          <input type="number" id="spindleRpm" value="10000" step="500" min="0">
+        </div>
+        <div class="pi">
+          <label>ウォームアップ(秒)</label>
+          <input type="number" id="spindleWarmup" value="2.0" step="0.5" min="0">
+        </div>
+      </div>
+    </div>
+
+    <!-- MACHINE -->
+    <div class="section">
+      <div class="section-hd">機体可動域</div>
+      <div class="pg">
+        <div class="pi">
+          <label>X最大 (mm)</label>
+          <input type="number" id="machineX" value="295" step="1" min="1">
+        </div>
+        <div class="pi">
+          <label>Y最大 (mm)</label>
+          <input type="number" id="machineY" value="400" step="1" min="1">
+        </div>
+      </div>
+    </div>
+
+    <!-- ACTIONS -->
+    <div class="section">
+      <div class="section-hd">アクション</div>
+      <div class="btn-row">
+        <button class="btn btn-blue"  id="btnParse"    disabled>◈ 解析</button>
+        <button class="btn btn-amber" id="btnTrace"    disabled>⬜ トレース</button>
+        <button class="btn btn-green" id="btnGenerate" disabled>⚙ Gコード生成</button>
+      </div>
+    </div>
+
+    <!-- LOG -->
+    <div class="section" id="logSection" style="display:none">
+      <div class="section-hd">解析ログ</div>
+      <div class="log" id="logPanel"></div>
+    </div>
+
+    <!-- SPACER -->
+    <div style="flex:1"></div>
+
+    <!-- FOOTER TIP -->
+    <div class="section">
+      <div class="tip">
+        【手順】ホーミング → G92 X0 Y0 Z0<br>
+        → トレース確認 → 切削実行<br>
+        ※ 全Gコード座標は機械原点基準(負値)
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══ RIGHT ═══ -->
+  <div class="right">
+
+    <div class="canvas-wrap">
+      <canvas id="preview"></canvas>
+      <div class="canvas-hint" id="canvasHint">
+        ■ 機械原点(右奥)<br>
+        ● チェーン始点<br>
+        ─ チェーン(色別)<br>
+        ○ 円弧(G2)<br>
+        ┄ バウンディングボックス
+      </div>
+    </div>
+
+    <div class="output">
+      <div class="output-tabs">
+        <div class="tab active" id="tabCut"   onclick="switchTab('cut')">切削 G-code</div>
+        <div class="tab"        id="tabTrace" onclick="switchTab('trace')">トレース G-code</div>
+        <div style="margin-left:auto;display:flex;align-items:center;padding-right:8px;gap:5px">
+          <span id="gcodeStats" style="font-family:var(--mono);font-size:9px;color:var(--text3)"></span>
+        </div>
+      </div>
+      <div class="output-body">
+        <textarea class="gcode" id="gcodeOut" readonly
+          placeholder="; DXFを読み込み、Gコードを生成してください&#10;; ─────────────────────────────&#10;; 1. DXFファイルをドロップ&#10;; 2. ◈ 解析ボタンで読み込み&#10;; 3. ⚙ Gコード生成で出力"></textarea>
+        <div class="output-actions">
+          <button class="btn btn-green" id="btnDlCut"   disabled onclick="dl('cut')">⬇ 切削.nc</button>
+          <button class="btn btn-blue"  id="btnDlTrace" disabled onclick="dl('trace')">⬇ トレース.nc</button>
+          <button class="btn btn-ghost" onclick="copyGcode()">⧉ コピー</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════════
+const S = {
+  raw: null, filename: null, entities: [],
+  lines: [], chains: [], circles: [], origin: null, bbox: null,
+  valid: false, gcut: '', gtrace: '',
+  tab: 'cut',
+  // Phase 1: layer-based rules
+  rules: [],
+  chainsByRule: {},   // ruleId -> chains[]
+  circlesByRule: {},  // ruleId -> circles[]
+  bboxByRule: {}      // ruleId -> bbox
+};
+
+// Color palette for rules (matches draw())
+const RULE_COLORS = ['#4da6ff','#3ddc84','#f0a030','#ff6060','#c084fc','#22d3ee','#fbbf24','#86efac'];
+
+// ══════════════════════════════════════════════════════════════════
+// RULE MANAGEMENT
+// ══════════════════════════════════════════════════════════════════
+const STORAGE_KEY = 'cnc-cam-rules-v1';
+
+function newRuleId() {
+  return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+}
+
+function defaultRule(layer = 'L1') {
+  return {
+    id: newRuleId(),
+    layer: layer,
+    op: 'profile',          // future: 'pocket', 'drill', 'counterbore'
+    toolDia: 3.0,           // 工具径（mm）。タブ幅の妥当性チェック等に使用
+    zTotal: 2.0,
+    zStep:  0.5,
+    feedXY: 500,
+    feedZ:  150,
+    enabled: true,
+    visible: true,          // canvas-only visibility (does not affect G-code)
+    tabs: {                 // 保持タブ設定（外形切り抜き時に部材飛散を防ぐ）
+      enabled: false,
+      count: 4,
+      width: 3.0,
+      height: 0.8
+    }
+  };
+}
+
+function saveRules() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(S.rules));
+  } catch (e) { /* ignore quota errors */ }
+}
+
+function loadRules() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr) || arr.length === 0) return null;
+    // Validate minimal shape
+    return arr.filter(r => r && typeof r.layer === 'string').map(r => ({
+      id:      r.id      || newRuleId(),
+      layer:   r.layer   || 'L1',
+      op:      r.op      || 'profile',
+      toolDia: Number(r.toolDia) || 3.0,    // default 3mm if missing (backward compat)
+      zTotal:  Number(r.zTotal)  || 2.0,
+      zStep:   Number(r.zStep)   || 0.5,
+      feedXY:  Number(r.feedXY)  || 500,
+      feedZ:   Number(r.feedZ)   || 150,
+      enabled: r.enabled !== false,
+      visible: r.visible !== false,   // default true if missing (backward compat)
+      tabs: {
+        enabled: !!(r.tabs && r.tabs.enabled),
+        count:   Number(r.tabs && r.tabs.count)  || 4,
+        width:   Number(r.tabs && r.tabs.width)  || 3.0,
+        height:  Number(r.tabs && r.tabs.height) || 0.8
+      }
+    }));
+  } catch (e) { return null; }
+}
+
+function ruleColorFor(idx) {
+  return RULE_COLORS[idx % RULE_COLORS.length];
+}
+
+function renderRules() {
+  const list = document.getElementById('ruleList');
+  list.innerHTML = '';
+  S.rules.forEach((r, idx) => {
+    const card = document.createElement('div');
+    const cls = ['rule-card'];
+    if (!r.enabled) cls.push('disabled');
+    if (!r.visible) cls.push('hidden-rule');
+    card.className = cls.join(' ');
+    card.dataset.id = r.id;
+    const dotStyle = r.visible
+      ? `background:${ruleColorFor(idx)}`
+      : `background:transparent;border:1px solid ${ruleColorFor(idx)}`;
+    card.innerHTML = `
+      <div class="rule-card-hd">
+        <button class="rule-color-btn" data-act="vis" title="表示/非表示 (Shift+クリックで単独表示)" style="${dotStyle}"></button>
+        <span class="rule-num">RULE ${idx + 1}</span>
+        <div class="rule-actions">
+          <button class="rule-btn" data-act="toggle" title="加工有効/無効">${r.enabled ? '◉' : '○'}</button>
+          <button class="rule-btn" data-act="up" title="上へ" ${idx === 0 ? 'disabled' : ''}>▲</button>
+          <button class="rule-btn" data-act="down" title="下へ" ${idx === S.rules.length - 1 ? 'disabled' : ''}>▼</button>
+          <button class="rule-btn del" data-act="del" title="削除" ${S.rules.length <= 1 ? 'disabled' : ''}>✕</button>
+        </div>
+      </div>
+      <div class="pg">
+        <div class="pi wide">
+          <label>レイヤー名</label>
+          <input type="text" data-f="layer" value="${r.layer}">
+        </div>
+        <div class="pi wide">
+          <label>操作</label>
+          <select data-f="op">
+            <option value="profile" ${r.op==='profile'?'selected':''}>プロファイル（線・円周追従）</option>
+            <option value="pocket"  disabled>ポケット (Phase 2)</option>
+            <option value="drill"   disabled>ドリル (Phase 2)</option>
+          </select>
+        </div>
+        <div class="pi wide">
+          <label>刃径 (mm) ★ タブ幅・将来の工具径補正で使用</label>
+          <input type="number" data-f="toolDia" value="${r.toolDia}" step="0.5" min="0.1">
+        </div>
+        <div class="pi">
+          <label>総深さ (mm)</label>
+          <input type="number" data-f="zTotal" value="${r.zTotal}" step="0.5" min="0.1">
+        </div>
+        <div class="pi">
+          <label>切込み/パス (mm)</label>
+          <input type="number" data-f="zStep" value="${r.zStep}" step="0.1" min="0.05">
+        </div>
+        <div class="pi">
+          <label>水平送り (mm/min)</label>
+          <input type="number" data-f="feedXY" value="${r.feedXY}" step="50" min="1">
+        </div>
+        <div class="pi">
+          <label>Z進入送り (mm/min)</label>
+          <input type="number" data-f="feedZ" value="${r.feedZ}" step="10" min="1">
+        </div>
+      </div>
+      <div class="tab-sect ${r.tabs.enabled ? '' : 'disabled'}">
+        <div class="tab-sect-hd">
+          <input type="checkbox" id="tabchk-${r.id}" data-f="tabs.enabled" ${r.tabs.enabled ? 'checked' : ''}>
+          <label for="tabchk-${r.id}">保持タブを使う（最終パスのみ）</label>
+        </div>
+        <div class="pg">
+          <div class="pi">
+            <label>数</label>
+            <input type="number" data-f="tabs.count" value="${r.tabs.count}" step="1" min="1" max="20">
+          </div>
+          <div class="pi">
+            <label>幅 (mm)</label>
+            <input type="number" data-f="tabs.width" value="${r.tabs.width}" step="0.5" min="0.5">
+          </div>
+          <div class="pi">
+            <label>高さ (mm)</label>
+            <input type="number" data-f="tabs.height" value="${r.tabs.height}" step="0.1" min="0.1">
+          </div>
+        </div>
+      </div>
+    `;
+    list.appendChild(card);
+  });
+  wireRuleCards();
+}
+
+function wireRuleCards() {
+  document.querySelectorAll('.rule-card').forEach(card => {
+    const id = card.dataset.id;
+    const r  = S.rules.find(x => x.id === id);
+    if (!r) return;
+
+    card.querySelectorAll('input[data-f], select[data-f]').forEach(inp => {
+      inp.addEventListener('change', e => {
+        const f = e.target.dataset.f;
+        let v = e.target.value;
+        // Nested field: tabs.xxx
+        if (f.startsWith('tabs.')) {
+          const sub = f.slice(5);
+          if (sub === 'enabled') {
+            r.tabs.enabled = e.target.checked;
+          } else {
+            r.tabs[sub] = parseFloat(v) || 0;
+          }
+        } else if (f === 'layer' || f === 'op') {
+          r[f] = v.trim() || (f === 'layer' ? 'L1' : 'profile');
+        } else {
+          r[f] = parseFloat(v) || 0;
+        }
+        saveRules();
+        // tabs.enabled toggle: re-render to update disabled-style on inputs
+        if (f === 'tabs.enabled') {
+          renderRules();
+        }
+        if (S.entities.length > 0) process();
+      });
+    });
+
+    card.querySelectorAll('.rule-btn, .rule-color-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        const act = e.currentTarget.dataset.act;
+        const idx = S.rules.findIndex(x => x.id === id);
+        if (idx < 0) return;
+        if (act === 'vis') {
+          // Shift+click: solo mode (show only this rule, hide others)
+          if (e.shiftKey) {
+            const allSoloed = S.rules.every((x, i) => (i === idx ? x.visible : !x.visible));
+            if (allSoloed) {
+              // Already soloed → restore all visible
+              S.rules.forEach(x => x.visible = true);
+            } else {
+              // Solo: this one visible, others hidden
+              S.rules.forEach((x, i) => x.visible = (i === idx));
+            }
+          } else {
+            r.visible = !r.visible;
+          }
+          saveRules();
+          renderRules();
+          // Visibility change does not need re-process(); just redraw
+          draw(S.lines, S.bbox,
+               parseFloat(p('machineX'))||295,
+               parseFloat(p('machineY'))||400);
+          return;
+        }
+        if (act === 'toggle') {
+          r.enabled = !r.enabled;
+        } else if (act === 'up' && idx > 0) {
+          [S.rules[idx-1], S.rules[idx]] = [S.rules[idx], S.rules[idx-1]];
+        } else if (act === 'down' && idx < S.rules.length - 1) {
+          [S.rules[idx+1], S.rules[idx]] = [S.rules[idx], S.rules[idx+1]];
+        } else if (act === 'del' && S.rules.length > 1) {
+          S.rules.splice(idx, 1);
+        }
+        saveRules();
+        renderRules();
+        if (S.entities.length > 0) process();
+      });
+    });
+  });
+}
+
+function addRule() {
+  // Suggest a fresh layer name based on existing
+  const used = new Set(S.rules.map(r => r.layer.toUpperCase()));
+  let cand = 'L2';
+  for (let i = 2; i < 99; i++) {
+    if (!used.has('L' + i)) { cand = 'L' + i; break; }
+  }
+  const r = defaultRule(cand);
+  // Inherit feeds/depths from last rule for convenience
+  if (S.rules.length > 0) {
+    const last = S.rules[S.rules.length - 1];
+    r.zTotal = last.zTotal; r.zStep = last.zStep;
+    r.feedXY = last.feedXY; r.feedZ = last.feedZ;
+  }
+  S.rules.push(r);
+  saveRules();
+  renderRules();
+  if (S.entities.length > 0) process();
+}
+
+function initRules() {
+  const loaded = loadRules();
+  S.rules = (loaded && loaded.length > 0) ? loaded : [defaultRule('L1')];
+  renderRules();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// MINIMAL DXF PARSER
+// Handles: LINE, CIRCLE, LWPOLYLINE, SPLINE
+// ══════════════════════════════════════════════════════════════════
+function parseDXF(text) {
+  // Split on any line ending: \r\n, \r, \n
+  const raw = text.split(/\r\n|\r|\n/);
+  const grp = [];
+  for (let i = 0; i + 1 < raw.length; i += 2) {
+    const c = parseInt(raw[i].trim(), 10);
+    const v = raw[i + 1].trim();
+    if (!isNaN(c)) grp.push([c, v]);
+  }
+
+  // $INSUNITS から単位スケールを取得
+  // 1=inch, 4=mm, 0=unitless(as-is)
+  const INSUNITS_SCALE = { '1':25.4, '2':304.8, '4':1.0, '5':10.0, '6':1000.0 };
+  let unitScale = 1.0;
+  let unitName  = 'mm (unitless)';
+  let inHeader  = false;
+  let curVar    = null;
+  for (const [c, v] of grp) {
+    if (c === 2 && v === 'HEADER') { inHeader = true; continue; }
+    if (c === 0 && v === 'ENDSEC' && inHeader) { inHeader = false; continue; }
+    if (!inHeader) continue;
+    if (c === 9) { curVar = v; continue; }
+    if (curVar === '$INSUNITS') {
+      unitScale = INSUNITS_SCALE[v] ?? 1.0;
+      const names = {'0':'unitless','1':'inch','2':'feet','4':'mm','5':'cm','6':'m'};
+      unitName = names[v] ?? `unit(${v})`;
+      curVar = null;
+    } else { curVar = null; }
+  }
+
+  const ents = [];
+  let inE = false, cur = null;
+
+  for (let i = 0; i < grp.length; i++) {
+    const [c, v] = grp[i];
+
+    if (c === 2 && v === 'ENTITIES') { inE = true; continue; }
+    if (c === 0 && v === 'ENDSEC' && inE) {
+      if (cur) { ents.push(cur); cur = null; }
+      inE = false; continue;
+    }
+    if (!inE) continue;
+
+    if (c === 0) {
+      if (cur) ents.push(cur);
+      cur = null;
+      if (v === 'LINE')       cur = { t:'L', layer:'', x1:0,y1:0,x2:0,y2:0 };
+      if (v === 'CIRCLE')     cur = { t:'C', layer:'', cx:0,cy:0,r:0 };
+      if (v === 'LWPOLYLINE') cur = { t:'P', layer:'', pts:[], closed:false, cur_x:null };
+      if (v === 'SPLINE')     cur = { t:'S', layer:'', degree:3, flags:0,
+                                      knots:[], ctrlPts:[], cur_x:null };
+      continue;
+    }
+    if (!cur) continue;
+    if (c === 8) { cur.layer = v; continue; }
+    const n = parseFloat(v);
+    if (cur.t === 'L') {
+      if (c===10) cur.x1=n; else if (c===20) cur.y1=n;
+      else if (c===11) cur.x2=n; else if (c===21) cur.y2=n;
+    } else if (cur.t === 'C') {
+      if (c===10) cur.cx=n; else if (c===20) cur.cy=n; else if (c===40) cur.r=n;
+    } else if (cur.t === 'P') {
+      if (c===70) { cur.closed = !!(parseInt(v) & 1); }
+      else if (c===10) { cur.cur_x = n; }
+      else if (c===20 && cur.cur_x !== null) {
+        cur.pts.push([cur.cur_x, n]);
+        cur.cur_x = null;
+      }
+    } else if (cur.t === 'S') {
+      if (c===70) { cur.flags  = parseInt(v); }
+      else if (c===71) { cur.degree = parseInt(v); }
+      else if (c===40) { cur.knots.push(n); }
+      else if (c===10) { cur.cur_x = n; }
+      else if (c===20 && cur.cur_x !== null) {
+        cur.ctrlPts.push([cur.cur_x, n]);
+        cur.cur_x = null;
+      }
+    }
+  }
+  if (cur) ents.push(cur);
+  return { ents, unitScale, unitName };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PROCESS — shift, validate, draw
+// ══════════════════════════════════════════════════════════════════
+function process() {
+  const lOrig = p('layerOrigin').trim();
+  const sc    = parseFloat(p('scale'))    || 1.0;
+  const mX    = parseFloat(p('machineX')) || 295;
+  const mY    = parseFloat(p('machineY')) || 400;
+
+  const msgs = [];
+  let ok = true;
+
+  // Entity counts per layer
+  const lyrInfo = {};
+  S.entities.forEach(e => {
+    const k = e.layer || '(無名)';
+    if (!lyrInfo[k]) lyrInfo[k] = {};
+    lyrInfo[k][e.t] = (lyrInfo[k][e.t]||0) + 1;
+  });
+  Object.entries(lyrInfo).forEach(([k,v]) => {
+    const typeNames = {'L':'LINE','C':'CIRCLE','P':'LWPOLY','S':'SPLINE'};
+    const d = Object.entries(v).map(([t,n])=>`${typeNames[t]||t}×${n}`).join(', ');
+    msgs.push({c:'info', m:`[${k}] ${d}`});
+  });
+
+  // Find origin — priority: CIRCLE > SPLINE (centroid) on origin layer
+  const origCircles = S.entities.filter(e =>
+    e.t==='C' && e.layer.toUpperCase()===lOrig.toUpperCase()
+  );
+  const origSplines = S.entities.filter(e =>
+    e.t==='S' && e.layer.toUpperCase()===lOrig.toUpperCase()
+  );
+
+  let originX = null, originY = null, originSrc = '';
+
+  if (origCircles.length === 1) {
+    originX = origCircles[0].cx;
+    originY = origCircles[0].cy;
+    originSrc = `CIRCLE r=${origCircles[0].r.toFixed(2)}`;
+  } else if (origCircles.length > 1) {
+    msgs.push({c:'err', m:`✗ 原点レイヤーにCIRCLE ${origCircles.length}個 (1個のみ可)`}); ok=false;
+  } else if (origSplines.length >= 1) {
+    // Use centroid of first spline's control points
+    const sp = origSplines[0];
+    if (sp.ctrlPts && sp.ctrlPts.length > 0) {
+      let sx=0, sy=0;
+      sp.ctrlPts.forEach(pt => { sx+=pt[0]; sy+=pt[1]; });
+      originX = sx / sp.ctrlPts.length;
+      originY = sy / sp.ctrlPts.length;
+      originSrc = `SPLINE重心 (ctrl×${sp.ctrlPts.length})`;
+      msgs.push({c:'warn', m:`⚠ 原点にCIRCLEなし → SPLINE重心を使用`});
+    } else {
+      msgs.push({c:'err', m:`✗ 原点レイヤーのSPLINEに制御点なし`}); ok=false;
+    }
+  } else {
+    msgs.push({c:'err', m:`✗ 原点レイヤー"${lOrig}"にCIRCLE/SPLINEなし`}); ok=false;
+  }
+
+  if (!ok) {
+    setValid(false, msgs);
+    draw([], null, mX, mY);
+    return;
+  }
+
+  const ox = originX * sc;
+  const oy = originY * sc;
+  msgs.push({c:'ok', m:`✓ 原点(${originSrc}): (${ox.toFixed(3)}, ${oy.toFixed(3)})`});
+
+  const ofX = parseFloat(p('offsetX')) || 0;
+  const ofY = parseFloat(p('offsetY')) || 0;
+  if (ofX !== 0 || ofY !== 0) {
+    msgs.push({c:'info', m:`↳ オフセット: X${ofX>=0?'+':''}${ofX} Y${ofY>=0?'+':''}${ofY} mm`});
+  }
+
+  const splineTol = parseFloat(p('splineTol')) || 0.05;
+  const MIN_CIRCLE_R = 0.1;
+
+  // Reset per-rule buckets
+  S.chainsByRule  = {};
+  S.circlesByRule = {};
+  S.bboxByRule    = {};
+
+  // Aggregated for legacy fields (used by draw + bbox check + trace)
+  const allSegsAggregate    = [];
+  const allCirclesAggregate = [];
+
+  const enabledRules = S.rules.filter(r => r.enabled);
+  if (enabledRules.length === 0) {
+    msgs.push({c:'err', m:`✗ 有効なルールがありません`});
+    setValid(false, msgs);
+    draw([], null, mX, mY);
+    return;
+  }
+
+  // Per-rule processing
+  let totalEntsAcrossRules = 0;
+  enabledRules.forEach((rule, ridx) => {
+    const lc = rule.layer.toUpperCase();
+
+    // タブ設定のバリデーション（タブ有効時のみ）
+    if (rule.tabs && rule.tabs.enabled) {
+      const margin = rule.tabs.width - rule.toolDia;
+      if (margin <= 0) {
+        msgs.push({c:'err',
+          m:`✗ [${rule.layer}] タブ幅(${rule.tabs.width}mm) ≤ 刃径(${rule.toolDia}mm) → タブ消失（残幅${margin.toFixed(1)}mm）`});
+      } else if (margin < 2.0) {
+        msgs.push({c:'warn',
+          m:`⚠ [${rule.layer}] タブ残幅 ${margin.toFixed(1)}mm（推奨: 刃径+2mm以上、つまりタブ幅≧${(rule.toolDia+2).toFixed(1)}mm）`});
+      }
+      if (rule.tabs.height >= rule.zTotal) {
+        msgs.push({c:'err',
+          m:`✗ [${rule.layer}] タブ高さ(${rule.tabs.height}mm) ≥ 総深さ(${rule.zTotal}mm) → タブ無効化`});
+      }
+    }
+
+    const rLines = S.entities.filter(e => e.t==='L' && e.layer.toUpperCase()===lc);
+
+    const rPolys = S.entities.filter(e => e.t==='P' && e.layer.toUpperCase()===lc);
+    const polySegs = [];
+    rPolys.forEach(po => {
+      for (let i=0; i<po.pts.length-1; i++) {
+        polySegs.push({ x1:po.pts[i][0], y1:po.pts[i][1], x2:po.pts[i+1][0], y2:po.pts[i+1][1] });
+      }
+      if (po.closed && po.pts.length > 1) {
+        const last = po.pts[po.pts.length-1];
+        polySegs.push({ x1:last[0], y1:last[1], x2:po.pts[0][0], y2:po.pts[0][1] });
+      }
+    });
+
+    const rSplines = S.entities.filter(e => e.t==='S' && e.layer.toUpperCase()===lc);
+    const splineSegs = [];
+    const splineErrors = [];
+    rSplines.forEach((sp, idx) => {
+      try {
+        const segs = splineToSegments(sp, splineTol / (sc || 1));
+        splineSegs.push(...segs);
+      } catch(e) {
+        splineErrors.push(`SPLINE[${idx}]: ${e.message}`);
+      }
+    });
+    if (splineErrors.length > 0) {
+      msgs.push({c:'warn', m:`[${rule.layer}] SPLINE計算エラー ${splineErrors.length}件: ${splineErrors[0]}`});
+    }
+
+    const rCircles = S.entities.filter(e =>
+      e.t==='C' && e.layer.toUpperCase()===lc && e.r >= MIN_CIRCLE_R
+    );
+
+    const totalRaw = rLines.length + polySegs.length + splineSegs.length + rCircles.length;
+
+    if (totalRaw === 0) {
+      msgs.push({c:'warn', m:`⚠ [${rule.layer}] エンティティなし`});
+      S.chainsByRule[rule.id]  = [];
+      S.circlesByRule[rule.id] = [];
+      S.bboxByRule[rule.id]    = null;
+      return;
+    }
+
+    totalEntsAcrossRules += totalRaw;
+
+    const parts = [];
+    if (rLines.length   > 0) parts.push(`LINE×${rLines.length}`);
+    if (rPolys.length   > 0) parts.push(`POLY×${rPolys.length}→${polySegs.length}segs`);
+    if (rSplines.length > 0) parts.push(`SPLINE×${rSplines.length}→${splineSegs.length}segs`);
+    if (rCircles.length > 0) parts.push(`CIRCLE×${rCircles.length}`);
+    msgs.push({c:'ok', m:`✓ [${rule.layer}] ${parts.join(', ')}`});
+
+    // Apply origin shift + workpiece offset
+    const segs = [
+      ...rLines.map(l => ({
+        x1:l.x1*sc-ox+ofX, y1:l.y1*sc-oy+ofY,
+        x2:l.x2*sc-ox+ofX, y2:l.y2*sc-oy+ofY
+      })),
+      ...polySegs.map(l => ({
+        x1:l.x1*sc-ox+ofX, y1:l.y1*sc-oy+ofY,
+        x2:l.x2*sc-ox+ofX, y2:l.y2*sc-oy+ofY
+      })),
+      ...splineSegs.map(l => ({
+        x1:l.x1*sc-ox+ofX, y1:l.y1*sc-oy+ofY,
+        x2:l.x2*sc-ox+ofX, y2:l.y2*sc-oy+ofY
+      }))
+    ];
+    const circles = rCircles.map(c => ({
+      cx: c.cx*sc - ox + ofX,
+      cy: c.cy*sc - oy + ofY,
+      r:  c.r * sc
+    }));
+
+    // Per-rule chain optimization (preserves layer separation)
+    const chains = orderChains(buildChains(segs));
+    S.chainsByRule[rule.id]  = chains;
+    S.circlesByRule[rule.id] = circles;
+
+    // Per-rule bbox
+    let xmn=Infinity,xmx=-Infinity,ymn=Infinity,ymx=-Infinity;
+    segs.forEach(l => {
+      xmn=Math.min(xmn,l.x1,l.x2); xmx=Math.max(xmx,l.x1,l.x2);
+      ymn=Math.min(ymn,l.y1,l.y2); ymx=Math.max(ymx,l.y1,l.y2);
+    });
+    circles.forEach(c => {
+      xmn=Math.min(xmn,c.cx-c.r); xmx=Math.max(xmx,c.cx+c.r);
+      ymn=Math.min(ymn,c.cy-c.r); ymx=Math.max(ymx,c.cy+c.r);
+    });
+    S.bboxByRule[rule.id] = (segs.length+circles.length>0) ? {xmn,xmx,ymn,ymx} : null;
+
+    if (segs.length > 0) {
+      const reduction = Math.round((1 - chains.length/segs.length) * 100);
+      msgs.push({c:'ok', m:`  └ チェーン: ${segs.length}→${chains.length} (Z削減 ${reduction}%)`});
+    }
+
+    allSegsAggregate.push(...segs);
+    allCirclesAggregate.push(...circles);
+  });
+
+  if (totalEntsAcrossRules === 0) {
+    msgs.push({c:'err', m:`✗ どのルールにもエンティティが見つかりません`});
+    setValid(false, msgs);
+    draw([], null, mX, mY);
+    return;
+  }
+
+  // Aggregate bounding box (union of all rule bboxes)
+  let xmn=Infinity,xmx=-Infinity,ymn=Infinity,ymx=-Infinity;
+  Object.values(S.bboxByRule).forEach(b => {
+    if (!b) return;
+    xmn=Math.min(xmn,b.xmn); xmx=Math.max(xmx,b.xmx);
+    ymn=Math.min(ymn,b.ymn); ymx=Math.max(ymx,b.ymx);
+  });
+  const bb = {xmn,xmx,ymn,ymx};
+  const W = (xmx-xmn).toFixed(1), H = (ymx-ymn).toFixed(1);
+  msgs.push({c:'ok', m:`✓ 全体BB: X(${xmn.toFixed(1)}～${xmx.toFixed(1)}) W=${W}mm`});
+  msgs.push({c:'ok', m:`         Y(${ymn.toFixed(1)}～${ymx.toFixed(1)}) H=${H}mm`});
+
+  // Machine limit check
+  let limOk=true;
+  if (xmn < -mX) { msgs.push({c:'err', m:`✗ X最小(${xmn.toFixed(1)}) < -${mX}`}); limOk=false; }
+  if (xmx >  mX) { msgs.push({c:'err', m:`✗ X最大(${xmx.toFixed(1)}) > +${mX}`}); limOk=false; }
+  if (ymn < -mY) { msgs.push({c:'err', m:`✗ Y最小(${ymn.toFixed(1)}) < -${mY}`}); limOk=false; }
+  if (ymx >  mY) { msgs.push({c:'err', m:`✗ Y最大(${ymx.toFixed(1)}) > +${mY}`}); limOk=false; }
+  if (limOk) msgs.push({c:'ok', m:`✓ 可動域チェック OK (${mX}×${mY}mm)`});
+
+  // Legacy aggregate fields (used by draw + trace)
+  S.lines   = allSegsAggregate;
+  S.circles = allCirclesAggregate;
+  S.chains  = []; // Not used directly anymore — drawing iterates S.chainsByRule
+  S.origin  = {x:ox, y:oy};
+  S.bbox    = bb;
+  S.valid   = limOk;
+
+  setValid(limOk, msgs);
+  draw(S.lines, bb, mX, mY);
+}
+
+function setValid(ok, msgs) {
+  S.valid = ok;
+  document.getElementById('btnGenerate').disabled = !ok;
+  document.getElementById('btnTrace').disabled    = !ok;
+
+  const badge = document.getElementById('hdrBadge');
+  badge.textContent = ok ? 'READY' : 'ERROR';
+  badge.className   = 'status-badge ' + (ok?'ready':'error');
+
+  const sec = document.getElementById('logSection');
+  sec.style.display = 'block';
+  const panel = document.getElementById('logPanel');
+  panel.innerHTML = msgs.map(m =>
+    `<div class="log-line ${m.c}">${m.m}</div>`
+  ).join('');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CANVAS RENDERER
+// Origin (0,0) = top-right (machine home = right-back)
+// X- goes LEFT on canvas, Y- goes DOWN on canvas
+// ══════════════════════════════════════════════════════════════════
+function draw(lines, bb, mX, mY) {
+  const canvas = document.getElementById('preview');
+  const wrap   = canvas.parentElement;
+  const pad    = 36;
+
+  // Fit canvas to container while keeping aspect ratio
+  const cw0 = wrap.clientWidth  - 32;
+  const ch0 = wrap.clientHeight - 32;
+  const ar  = mX / mY;
+  let cw, ch;
+  if (cw0/ch0 > ar) { ch=Math.min(ch0,520); cw=ch*ar; }
+  else              { cw=Math.min(cw0,380); ch=cw/ar; }
+  canvas.width  = Math.floor(cw);
+  canvas.height = Math.floor(ch);
+
+  const ctx = canvas.getContext('2d');
+  const dW  = canvas.width  - 2*pad;
+  const dH  = canvas.height - 2*pad;
+
+  // Coord → canvas pixel
+  function tc(mx, my) {
+    // mx ∈ [−mX, 0]: canvas x from (width−pad) down to pad
+    const px = (canvas.width - pad) + (mx / mX) * dW;
+    const py = pad               - (my / mY) * dH;
+    return [px, py];
+  }
+
+  // Clear
+  ctx.fillStyle = '#040608';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Machine boundary
+  const [ox, oy_] = tc(0, 0);
+  const [fx, fy]  = tc(-mX, -mY);
+  ctx.strokeStyle = '#151e28';
+  ctx.lineWidth   = 1;
+  ctx.strokeRect(fx, oy_, ox-fx, fy-oy_);
+
+  // Grid lines
+  ctx.strokeStyle = '#0c1219';
+  ctx.lineWidth   = 0.5;
+  for (let x=0; x>=-mX; x-=50) {
+    const [px] = tc(x, 0);
+    const [,ya] = tc(x, 0); const [,yb] = tc(x, -mY);
+    ctx.beginPath(); ctx.moveTo(px,ya); ctx.lineTo(px,yb); ctx.stroke();
+  }
+  for (let y=0; y>=-mY; y-=50) {
+    const [,py] = tc(0, y);
+    const [xa]  = tc(0, y); const [xb] = tc(-mX, y);
+    ctx.beginPath(); ctx.moveTo(xa,py); ctx.lineTo(xb,py); ctx.stroke();
+  }
+
+  // Grid labels (X axis)
+  ctx.fillStyle = '#253040';
+  ctx.font = '8px JetBrains Mono, monospace';
+  for (let x=-50; x>=-mX; x-=50) {
+    const [px, py0] = tc(x, 0);
+    ctx.fillText(`${x}`, px-8, py0+12);
+  }
+  // Y axis
+  for (let y=-50; y>=-mY; y-=50) {
+    const [px0, py] = tc(0, y);
+    ctx.fillText(`${y}`, px0+4, py+3);
+  }
+
+  // Machine boundary label
+  ctx.fillStyle = '#253040';
+  ctx.font = '8px JetBrains Mono, monospace';
+  ctx.fillText(`−${mX}`, fx+2, fy-4);
+
+  // Bounding box
+  if (bb) {
+    const [bx1,by1] = tc(bb.xmn, bb.ymx);
+    const [bx2,by2] = tc(bb.xmx, bb.ymn);
+    ctx.strokeStyle = '#c08020';
+    ctx.lineWidth   = 0.8;
+    ctx.setLineDash([3,3]);
+    ctx.strokeRect(bx1, by1, bx2-bx1, by2-by1);
+    ctx.setLineDash([]);
+
+    // BB dimension labels
+    ctx.fillStyle = '#c08020';
+    ctx.font = '8px JetBrains Mono, monospace';
+    const W = (bb.xmx-bb.xmn).toFixed(1);
+    const H = (bb.ymx-bb.ymn).toFixed(1);
+    ctx.fillText(`W:${W}mm`, (bx1+bx2)/2-16, by2+10);
+    ctx.save();
+    ctx.translate(bx1-10, (by1+by2)/2);
+    ctx.rotate(-Math.PI/2);
+    ctx.fillText(`H:${H}mm`, -16, 0);
+    ctx.restore();
+  }
+
+  // Toolpaths — ルール別色分け（色はS.rulesの位置で固定）
+  // 描画対象 = enabled かつ visible なルールのみ
+  const drawableRules = S.rules
+    .map((r, idx) => ({ rule: r, idx: idx }))
+    .filter(x => x.rule.enabled && x.rule.visible !== false);
+  if (drawableRules.length > 0 && (Object.keys(S.chainsByRule).length > 0 || Object.keys(S.circlesByRule).length > 0)) {
+    drawableRules.forEach(({ rule, idx }) => {
+      const color  = ruleColorFor(idx);
+      const chains = S.chainsByRule[rule.id]  || [];
+      const circles = S.circlesByRule[rule.id] || [];
+
+      // Chains
+      ctx.strokeStyle = color;
+      ctx.lineWidth   = 1.2;
+      chains.forEach(chain => {
+        chain.forEach(seg => {
+          const [px1,py1] = tc(seg.x1, seg.y1);
+          const [px2,py2] = tc(seg.x2, seg.y2);
+          ctx.beginPath(); ctx.moveTo(px1,py1); ctx.lineTo(px2,py2); ctx.stroke();
+        });
+        // Chain start marker
+        if (chain.length > 0) {
+          const [sx,sy] = tc(chain[0].x1, chain[0].y1);
+          ctx.beginPath(); ctx.arc(sx,sy,2.5,0,Math.PI*2);
+          ctx.fillStyle = color;
+          ctx.fill();
+        }
+      });
+
+      // Circles (drawn in same rule color, no separate red)
+      circles.forEach(circ => {
+        const [pcx, pcy] = tc(circ.cx, circ.cy);
+        const [prx]      = tc(circ.cx + circ.r, circ.cy);
+        const pr = Math.abs(prx - pcx);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(pcx, pcy, pr, 0, Math.PI*2);
+        ctx.stroke();
+        ctx.beginPath(); ctx.arc(pcx, pcy, 1.5, 0, Math.PI*2);
+        ctx.fillStyle = color; ctx.fill();
+      });
+    });
+  } else if (lines.length > 0) {
+    ctx.strokeStyle = '#2a7aff';
+    ctx.lineWidth   = 1;
+    lines.forEach(l => {
+      const [px1,py1] = tc(l.x1, l.y1);
+      const [px2,py2] = tc(l.x2, l.y2);
+      ctx.beginPath(); ctx.moveTo(px1,py1); ctx.lineTo(px2,py2); ctx.stroke();
+    });
+  }
+
+  // Origin marker (machine origin = right-rear)
+  ctx.beginPath();
+  ctx.arc(ox, oy_, 5, 0, Math.PI*2);
+  ctx.fillStyle = '#ff3030';
+  ctx.fill();
+  ctx.strokeStyle = '#ff6060';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Crosshair at origin
+  ctx.strokeStyle = '#ff3030';
+  ctx.lineWidth   = 0.5;
+  ctx.beginPath(); ctx.moveTo(ox-8,oy_); ctx.lineTo(ox+8,oy_); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ox,oy_-8); ctx.lineTo(ox,oy_+8); ctx.stroke();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// NURBS B-SPLINE EVALUATOR  (De Boor algorithm)
+// degree-3 B-spline with arbitrary knot vector
+// ══════════════════════════════════════════════════════════════════
+function deBoor(knots, ctrlPts, degree, t) {
+  const n = ctrlPts.length - 1;
+  // Find knot span index k
+  let k = degree;
+  if (t >= knots[knots.length - 1]) {
+    k = knots.length - degree - 2;
+  } else {
+    for (let i = degree; i < knots.length - 1; i++) {
+      if (knots[i] <= t && t < knots[i + 1]) { k = i; break; }
+    }
+  }
+  // Copy relevant control points
+  const d = [];
+  for (let j = 0; j <= degree; j++) {
+    const idx = j + k - degree;
+    d.push([ctrlPts[idx][0], ctrlPts[idx][1]]);
+  }
+  // De Boor recursion
+  for (let r = 1; r <= degree; r++) {
+    for (let j = degree; j >= r; j--) {
+      const i     = j + k - degree;
+      const denom = knots[i + degree - r + 1] - knots[i];
+      const alpha = Math.abs(denom) < 1e-10 ? 0 : (t - knots[i]) / denom;
+      d[j][0] = (1 - alpha) * d[j - 1][0] + alpha * d[j][0];
+      d[j][1] = (1 - alpha) * d[j - 1][1] + alpha * d[j][1];
+    }
+  }
+  return d[degree];
+}
+
+function adaptiveSample(knots, ctrlPts, degree, t0, t1, p0, p1, tol, depth) {
+  if (depth > 12) return [];
+  const tm = (t0 + t1) / 2;
+  const pm = deBoor(knots, ctrlPts, degree, tm);
+  // Midpoint deviation from chord
+  const mx  = (p0[0] + p1[0]) / 2;
+  const my  = (p0[1] + p1[1]) / 2;
+  const err = Math.sqrt((pm[0]-mx)**2 + (pm[1]-my)**2);
+  if (err < tol) return [pm];
+  const L = adaptiveSample(knots, ctrlPts, degree, t0, tm, p0, pm, tol, depth+1);
+  const R = adaptiveSample(knots, ctrlPts, degree, tm, t1, pm, p1, tol, depth+1);
+  return [...L, pm, ...R];
+}
+
+function splineToSegments(sp, tol) {
+  const { knots, ctrlPts, degree, flags } = sp;
+  if (ctrlPts.length < degree + 1) return [];
+  const closed = !!(flags & 1);
+  const tMin = knots[degree];
+  const tMax = knots[knots.length - degree - 1];
+  const p0   = deBoor(knots, ctrlPts, degree, tMin);
+  const p1   = deBoor(knots, ctrlPts, degree, tMax);
+  const mid  = adaptiveSample(knots, ctrlPts, degree, tMin, tMax, p0, p1, tol, 0);
+  const pts  = [p0, ...mid, p1];
+  // Convert point array → segments
+  const segs = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    segs.push({ x1:pts[i][0], y1:pts[i][1], x2:pts[i+1][0], y2:pts[i+1][1] });
+  }
+  // Close if needed
+  if (closed && pts.length > 1) {
+    const last = pts[pts.length - 1];
+    segs.push({ x1:last[0], y1:last[1], x2:pts[0][0], y2:pts[0][1] });
+  }
+  return segs;
+}
+
+
+// Phase 1: 端点が一致する線を連結してチェーン（一筆書き）に
+// Phase 2: チェーン間を最近傍順序で並び替え
+// ══════════════════════════════════════════════════════════════════
+function ptDist(x1,y1,x2,y2) {
+  return Math.sqrt((x2-x1)**2+(y2-y1)**2);
+}
+
+function buildChains(lines, tol=0.001) {
+  const segs = lines.map(l => ({ x1:l.x1,y1:l.y1,x2:l.x2,y2:l.y2,used:false }));
+  const chains = [];
+
+  for (let s=0; s<segs.length; s++) {
+    if (segs[s].used) continue;
+    segs[s].used = true;
+    const chain = [{ x1:segs[s].x1,y1:segs[s].y1,x2:segs[s].x2,y2:segs[s].y2 }];
+
+    // 前方に延伸
+    let extended = true;
+    while (extended) {
+      extended = false;
+      const ex = chain[chain.length-1].x2;
+      const ey = chain[chain.length-1].y2;
+      for (let i=0; i<segs.length; i++) {
+        if (segs[i].used) continue;
+        if (ptDist(ex,ey,segs[i].x1,segs[i].y1) < tol) {
+          chain.push({x1:segs[i].x1,y1:segs[i].y1,x2:segs[i].x2,y2:segs[i].y2});
+          segs[i].used=true; extended=true; break;
+        }
+        if (ptDist(ex,ey,segs[i].x2,segs[i].y2) < tol) {
+          chain.push({x1:segs[i].x2,y1:segs[i].y2,x2:segs[i].x1,y2:segs[i].y1});
+          segs[i].used=true; extended=true; break;
+        }
+      }
+    }
+
+    // 後方にも延伸（チェーン先頭から逆方向）
+    extended = true;
+    while (extended) {
+      extended = false;
+      const sx = chain[0].x1;
+      const sy = chain[0].y1;
+      for (let i=0; i<segs.length; i++) {
+        if (segs[i].used) continue;
+        if (ptDist(sx,sy,segs[i].x2,segs[i].y2) < tol) {
+          chain.unshift({x1:segs[i].x1,y1:segs[i].y1,x2:segs[i].x2,y2:segs[i].y2});
+          segs[i].used=true; extended=true; break;
+        }
+        if (ptDist(sx,sy,segs[i].x1,segs[i].y1) < tol) {
+          chain.unshift({x1:segs[i].x2,y1:segs[i].y2,x2:segs[i].x1,y2:segs[i].y1});
+          segs[i].used=true; extended=true; break;
+        }
+      }
+    }
+
+    chains.push(chain);
+  }
+  return chains;
+}
+
+function orderChains(chains) {
+  if (chains.length <= 1) return chains;
+  const result = [chains[0]];
+  const rem    = chains.slice(1);
+
+  while (rem.length > 0) {
+    const last = result[result.length-1];
+    const ex   = last[last.length-1].x2;
+    const ey   = last[last.length-1].y2;
+    let bestIdx=0, bestDist=Infinity, bestRev=false;
+
+    rem.forEach((chain,i) => {
+      const d1 = ptDist(ex,ey, chain[0].x1, chain[0].y1);
+      const d2 = ptDist(ex,ey, chain[chain.length-1].x2, chain[chain.length-1].y2);
+      if (d1 < bestDist) { bestDist=d1; bestIdx=i; bestRev=false; }
+      if (d2 < bestDist) { bestDist=d2; bestIdx=i; bestRev=true;  }
+    });
+
+    let next = rem.splice(bestIdx,1)[0];
+    if (bestRev) {
+      next = next.slice().reverse().map(sg => ({x1:sg.x2,y1:sg.y2,x2:sg.x1,y2:sg.y1}));
+    }
+    result.push(next);
+  }
+  return result;
+}
+
+
+const f4 = n => n.toFixed(4);
+
+function buildPasses(zTotal, zStep) {
+  const passes = [];
+  let d = zStep;
+  while (d < zTotal + 1e-6) {
+    passes.push(Math.min(d, zTotal));
+    d += zStep;
+  }
+  if (!passes.length || passes[passes.length-1] < zTotal - 1e-6) {
+    passes.push(zTotal);
+  }
+  return passes;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// TABS — 保持タブ機能（最終パスで部材飛散防止のため指定数の橋を残す）
+// ══════════════════════════════════════════════════════════════════
+
+// チェーンが閉じている（始点≒終点）か判定
+function isChainClosed(chain, tol = 0.001) {
+  if (!chain || chain.length === 0) return false;
+  const last = chain[chain.length - 1];
+  return ptDist(chain[0].x1, chain[0].y1, last.x2, last.y2) < tol;
+}
+
+// チェーン全長を返す
+function chainLength(chain) {
+  let total = 0;
+  for (const seg of chain) {
+    total += ptDist(seg.x1, seg.y1, seg.x2, seg.y2);
+  }
+  return total;
+}
+
+// タブ範囲を計算（チェーン上の累積距離 [start, end] のリスト）
+// タブは N 等分の中心位置に配置（チェーン継ぎ目を避けるため (i+0.5)*interval を中心とする）
+function computeTabRanges(totalLen, count, width) {
+  const interval = totalLen / count;
+  const ranges = [];
+  for (let i = 0; i < count; i++) {
+    const center = (i + 0.5) * interval;
+    ranges.push({
+      start: center - width / 2,
+      end:   center + width / 2
+    });
+  }
+  return ranges;
+}
+
+// 最終パスでタブを適用しながらチェーンを切削するGコードを生成
+// chain: セグメント配列、dep: 最終深さ（正値）、fXY/fZ: 送り速度、tabs: { count, width, height }
+function emitChainWithTabs(chain, dep, fXY, fZ, tabs, msgs) {
+  let g = '';
+  const totalLen = chainLength(chain);
+
+  // タブ間隔がタブ幅より小さいと、タブ同士が重なる
+  const interval = totalLen / tabs.count;
+  if (interval < tabs.width) {
+    if (msgs) msgs.push({c:'warn',
+      m:`⚠ タブ間隔(${interval.toFixed(1)}mm) < タブ幅(${tabs.width}mm) → タブ無効化（チェーン全長 ${totalLen.toFixed(1)}mm）`});
+    // フォールバック: タブなしで通常切削
+    chain.forEach(seg => {
+      g += `G1 X${f4(seg.x2)} Y${f4(seg.y2)} F${fXY}\n`;
+    });
+    return g;
+  }
+
+  const tabRanges = computeTabRanges(totalLen, tabs.count, tabs.width);
+  const zCut = -dep;
+  const zTab = -dep + tabs.height;
+
+  let cumLen = 0;
+  let inTab = false;
+
+  for (const seg of chain) {
+    const segLen = ptDist(seg.x1, seg.y1, seg.x2, seg.y2);
+    const segStart = cumLen;
+    const segEnd   = cumLen + segLen;
+
+    // このセグメント内に存在するタブ境界点を抽出
+    const boundaries = [];
+    for (const tab of tabRanges) {
+      if (tab.start > segStart && tab.start < segEnd) {
+        boundaries.push({ pos: tab.start, type: 'enter' });
+      }
+      if (tab.end > segStart && tab.end < segEnd) {
+        boundaries.push({ pos: tab.end, type: 'exit' });
+      }
+    }
+    boundaries.sort((a, b) => a.pos - b.pos);
+
+    // 境界点でセグメントを分割しながら走破
+    for (const b of boundaries) {
+      const t = (b.pos - segStart) / segLen;
+      const bx = seg.x1 + (seg.x2 - seg.x1) * t;
+      const by = seg.y1 + (seg.y2 - seg.y1) * t;
+      g += `G1 X${f4(bx)} Y${f4(by)} F${fXY}\n`;
+      if (b.type === 'enter') {
+        g += `; -- tab enter\n`;
+        g += `G1 Z${f4(zTab)} F${fZ}\n`;
+        inTab = true;
+      } else {
+        g += `G1 Z${f4(zCut)} F${fZ}\n`;
+        g += `; -- tab exit\n`;
+        inTab = false;
+      }
+    }
+    // セグメント終端まで
+    g += `G1 X${f4(seg.x2)} Y${f4(seg.y2)} F${fXY}\n`;
+    cumLen = segEnd;
+  }
+
+  // タブ中で終わった場合（理論上、閉じたチェーンならありえないが保険）
+  if (inTab) {
+    g += `G1 Z${f4(zCut)} F${fZ}\n`;
+  }
+
+  return g;
+}
+
+function genCut() {
+  const zS  = Math.abs(parseFloat(p('zSafe')));
+  const zF  = Math.abs(parseFloat(p('zFinal')));
+  const rpm = parseFloat(p('spindleRpm'));
+  const wu  = parseFloat(p('spindleWarmup'));
+  const ofX = parseFloat(p('offsetX')) || 0;
+  const ofY = parseFloat(p('offsetY')) || 0;
+  const fn  = S.filename || 'unknown.dxf';
+  const now = new Date().toLocaleString('ja-JP');
+
+  const enabledRules = S.rules.filter(r => r.enabled);
+
+  // Stats
+  let totalChains = 0, totalCircles = 0, totalPlunges = 0, totalSegsRaw = 0;
+  enabledRules.forEach(rule => {
+    const ch = S.chainsByRule[rule.id]  || [];
+    const ci = S.circlesByRule[rule.id] || [];
+    const np = buildPasses(Math.abs(rule.zTotal), Math.abs(rule.zStep)).length;
+    totalChains  += ch.length;
+    totalCircles += ci.length;
+    totalPlunges += np * (ch.length + ci.length);
+    ch.forEach(c => totalSegsRaw += c.length);
+  });
+
+  let g = '';
+  g += `; === CNC CAM - CUTTING (multi-rule) ===\n`;
+  g += `; File    : ${fn}\n`;
+  g += `; Rules   : ${enabledRules.length} active\n`;
+  g += `; Spindle : S${rpm}  Warmup : ${wu}s\n`;
+  g += `; ZSafe   : ${zS}mm  ZFinal : ${zF}mm\n`;
+  g += `; Offset  : X${ofX>=0?'+':''}${ofX} Y${ofY>=0?'+':''}${ofY} mm\n`;
+  g += `; Chains  : ${totalChains}  Circles : ${totalCircles}  Plunges : ${totalPlunges}\n`;
+  g += `; Created : ${now}\n`;
+  g += `; ==========================\n`;
+  g += `;\n`;
+  enabledRules.forEach(rule => {
+    const origIdx = S.rules.indexOf(rule);
+    const np = buildPasses(Math.abs(rule.zTotal), Math.abs(rule.zStep)).length;
+    g += `; Rule ${origIdx+1}: layer="${rule.layer}" op=${rule.op} tool=Φ${rule.toolDia}mm `
+       + `Z=${rule.zTotal}/${rule.zStep}mm (${np}pass) F=${rule.feedXY}/${rule.feedZ}\n`;
+  });
+  g += `;\n`;
+  g += `; [Checklist]\n`;
+  g += `; [ ] Homing complete\n`;
+  g += `; [ ] Z touch-off done -> G92 Z0\n`;
+  g += `; [ ] G92 X0 Y0 Z0 sent\n`;
+  g += `; [ ] Trace file verified\n`;
+  g += `; [ ] Clamp clearance confirmed\n`;
+  g += `;\n`;
+  g += `G21\n`;
+  g += `G90\n`;
+  g += `G17\n`;
+  g += `G94\n`;
+  g += `M3 S${rpm}\n`;
+  g += `G4 P${wu}\n`;
+  g += `G0 Z${f4(zS)}\n`;
+  g += `;\n`;
+
+  enabledRules.forEach(rule => {
+    const origIdx = S.rules.indexOf(rule);
+    const chains  = S.chainsByRule[rule.id]  || [];
+    const circles = S.circlesByRule[rule.id] || [];
+    if (chains.length === 0 && circles.length === 0) return;
+
+    const passes = buildPasses(Math.abs(rule.zTotal), Math.abs(rule.zStep));
+    const fXY = rule.feedXY;
+    const fZ  = rule.feedZ;
+
+    g += `; ════════════════════════════════════════\n`;
+    g += `; RULE ${origIdx+1}: "${rule.layer}" (${rule.op})\n`;
+    g += `;   Tool: Φ${rule.toolDia}mm\n`;
+    g += `;   Depth=${rule.zTotal}mm  Step=${rule.zStep}mm  Passes=${passes.length}\n`;
+    g += `;   Chains=${chains.length}  Circles=${circles.length}\n`;
+    g += `; ════════════════════════════════════════\n`;
+
+    // タブ機能の事前判定
+    const useTabs = rule.tabs && rule.tabs.enabled;
+    if (useTabs) {
+      const closedChains = chains.filter(c => isChainClosed(c));
+      const openChains = chains.length - closedChains.length;
+      const effWidth = rule.tabs.width - rule.toolDia;
+      g += `;   Tabs: count=${rule.tabs.count} width=${rule.tabs.width}mm `
+         + `height=${rule.tabs.height}mm  effective=${effWidth.toFixed(2)}mm`;
+      if (effWidth <= 0) g += ' [WARNING: tabs vanish]';
+      g += `\n`;
+      g += `;   Tab-eligible chains: ${closedChains.length} closed`;
+      if (openChains > 0) g += ` (${openChains} open chains: tabs not applied)`;
+      if (circles.length > 0) g += `, ${circles.length} circles (tabs N/A in Phase 2.0)`;
+      g += `\n`;
+    }
+    g += `; ════════════════════════════════════════\n`;
+
+    passes.forEach((dep, pi) => {
+      const isFinalPass = (pi === passes.length - 1);
+      const applyTabs = useTabs && isFinalPass;
+      g += `; -- [${rule.layer}] pass ${pi+1}/${passes.length}  Z=-${dep.toFixed(4)}`;
+      if (applyTabs) g += `  [TABS]`;
+      g += `\n`;
+
+      // Linear chains
+      chains.forEach(chain => {
+        g += `G0 Z${f4(zS)}\n`;
+        g += `G0 X${f4(chain[0].x1)} Y${f4(chain[0].y1)}\n`;
+        g += `G1 Z${f4(-dep)} F${fZ}\n`;
+        if (applyTabs && isChainClosed(chain)) {
+          // 閉じたチェーンの最終パス: タブ付き切削
+          g += emitChainWithTabs(chain, dep, fXY, fZ, rule.tabs, null);
+        } else {
+          // 通常切削
+          chain.forEach(seg => {
+            g += `G1 X${f4(seg.x2)} Y${f4(seg.y2)} F${fXY}\n`;
+          });
+        }
+      });
+      // Circles (G2 full arc) — Phase 2.0時点ではタブ未対応
+      circles.forEach(circ => {
+        const ex = circ.cx + circ.r; // entry at 3 o'clock
+        g += `G0 Z${f4(zS)}\n`;
+        g += `G0 X${f4(ex)} Y${f4(circ.cy)}\n`;
+        g += `G1 Z${f4(-dep)} F${fZ}\n`;
+        g += `G2 X${f4(ex)} Y${f4(circ.cy)} I${f4(-circ.r)} J${f4(0)} F${fXY}\n`;
+      });
+      g += `;\n`;
+    });
+    // Retract to ZSafe between rules
+    g += `G0 Z${f4(zS)}\n`;
+    g += `;\n`;
+  });
+
+  g += `; === END ===\n`;
+  g += `M5\n`;
+  g += `G0 Z${f4(zF)}\n`;
+  g += `G0 X0.0 Y0.0\n`;
+  g += `M2\n`;
+  return g;
+}
+
+function genTrace() {
+  const zS  = Math.abs(parseFloat(p('zSafe')));
+  const zF  = Math.abs(parseFloat(p('zFinal')));
+  // Trace feed: use the highest enabled rule's feedXY, or 500 default
+  const enabledRules = S.rules.filter(r => r.enabled);
+  const fXY = enabledRules.length > 0
+    ? Math.max(...enabledRules.map(r => r.feedXY))
+    : 500;
+  const ofX = parseFloat(p('offsetX')) || 0;
+  const ofY = parseFloat(p('offsetY')) || 0;
+  const fn  = S.filename || 'unknown.dxf';
+  const now = new Date().toLocaleString('ja-JP');
+  const b   = S.bbox;
+
+  let g = '';
+  g += `; === CNC CAM - TRACE (boundary check) ===\n`;
+  g += `; File   : ${fn}\n`;
+  g += `; BB X   : ${f4(b.xmn)} to ${f4(b.xmx)}  W=${(b.xmx-b.xmn).toFixed(2)}mm\n`;
+  g += `; BB Y   : ${f4(b.ymn)} to ${f4(b.ymx)}  H=${(b.ymx-b.ymn).toFixed(2)}mm\n`;
+  g += `; Offset : X${ofX>=0?'+':''}${ofX} Y${ofY>=0?'+':''}${ofY} mm\n`;
+  g += `; Created: ${now}\n`;
+  g += `; ========================================\n`;
+  g += `;\n`;
+  g += `; [How to use]\n`;
+  g += `; 1. Home -> G92 X0 Y0 Z0\n`;
+  g += `; 2. Run this file (dry run at ZSafe)\n`;
+  g += `; 3. Check clamps and material size\n`;
+  g += `; 4. Run cutting file if OK\n`;
+  g += `;\n`;
+  g += `G21\nG90\nG94\n`;
+  g += `G0 Z${f4(zS)}\n`;
+  g += `;\n`;
+  g += `G0 X${f4(b.xmx)} Y${f4(b.ymx)}\n`;
+  g += `G1 X${f4(b.xmn)} Y${f4(b.ymx)} F${fXY}\n`;
+  g += `G1 X${f4(b.xmn)} Y${f4(b.ymn)} F${fXY}\n`;
+  g += `G1 X${f4(b.xmx)} Y${f4(b.ymn)} F${fXY}\n`;
+  g += `G1 X${f4(b.xmx)} Y${f4(b.ymx)} F${fXY}\n`;
+  g += `;\n`;
+  g += `; === END ===\n`;
+  g += `M5\n`;
+  g += `G0 Z${f4(zF)}\n`;
+  g += `G0 X0.0 Y0.0\n`;
+  g += `M2\n`;
+  return g;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// UI HELPERS
+// ══════════════════════════════════════════════════════════════════
+const p = id => document.getElementById(id).value;
+
+function switchTab(t) {
+  S.tab = t;
+  document.getElementById('tabCut').classList.toggle('active',   t==='cut');
+  document.getElementById('tabTrace').classList.toggle('active', t==='trace');
+  const out = document.getElementById('gcodeOut');
+  const code = t==='cut' ? S.gcut : S.gtrace;
+  out.value = code;
+  const lines = code ? code.split('\n').length : 0;
+  document.getElementById('gcodeStats').textContent = code ? `${lines} lines` : '';
+}
+
+function copyGcode() {
+  const v = document.getElementById('gcodeOut').value;
+  if (!v) return;
+  navigator.clipboard.writeText(v).then(() => {
+    const b = document.querySelector('[onclick="copyGcode()"]');
+    const old = b.textContent; b.textContent = '✓ コピー';
+    setTimeout(() => b.textContent = old, 1500);
+  });
+}
+
+function dl(type) {
+  const content = type==='cut' ? S.gcut : S.gtrace;
+  if (!content) return;
+  const base   = (S.filename||'output').replace(/\.dxf$/i,'');
+  const fname  = base + (type==='cut'?'_cut':'_trace') + '.nc';
+  const blob   = new Blob([content], {type:'text/plain'});
+  const url    = URL.createObjectURL(blob);
+  const a      = document.createElement('a');
+  a.href=url; a.download=fname; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// FILE HANDLING
+// ══════════════════════════════════════════════════════════════════
+function handleFile(file) {
+  if (!file || !file.name.toLowerCase().endsWith('.dxf')) {
+    alert('DXFファイルを選択してください (.dxf)');
+    return;
+  }
+  S.filename = file.name;
+
+  // Read as binary (ArrayBuffer), then try UTF-8 strict; fallback to Shift_JIS.
+  // DXFのデータ部分はASCIIなので、座標処理には影響しないが、レイヤー名等の
+  // 日本語文字が含まれる場合に正しい文字コードで読む必要がある。
+  const reader = new FileReader();
+  reader.onload = e => {
+    const buf = e.target.result;
+    let text;
+    let encName;
+    try {
+      // UTF-8 strict: 不正バイト列があれば例外
+      text = new TextDecoder('utf-8', { fatal: true }).decode(buf);
+      encName = 'UTF-8';
+    } catch (err) {
+      // フォールバック: Shift_JIS（VectorWorks/Illustrator JP の標準）
+      try {
+        text = new TextDecoder('shift_jis').decode(buf);
+        encName = 'Shift_JIS';
+      } catch (err2) {
+        alert('文字コードの判定に失敗しました（UTF-8でもShift_JISでもない可能性）');
+        return;
+      }
+    }
+    S.raw = text;
+
+    // Show file card
+    const fc = document.getElementById('fileCard');
+    fc.classList.add('show');
+    document.getElementById('fileCardName').textContent = file.name;
+    document.getElementById('fileCardSize').textContent =
+      (file.size/1024).toFixed(1) + ' KB  (' + encName + ')';
+
+    // Enable parse
+    document.getElementById('btnParse').disabled = false;
+
+    // Reset
+    S.gcut=''; S.gtrace='';
+    document.getElementById('gcodeOut').value='';
+    document.getElementById('logSection').style.display='none';
+    document.getElementById('btnGenerate').disabled=true;
+    document.getElementById('btnTrace').disabled=true;
+    document.getElementById('hdrBadge').textContent =
+      encName === 'UTF-8' ? 'LOADED' : 'LOADED(SJIS)';
+    document.getElementById('hdrBadge').className = 'status-badge warn';
+  };
+  reader.onerror = () => {
+    alert('ファイルの読み込みに失敗しました');
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// Drop zone wiring
+const dz = document.getElementById('dropzone');
+const fi = document.getElementById('fileInput');
+dz.addEventListener('click', () => fi.click());
+fi.addEventListener('change', e => handleFile(e.target.files[0]));
+dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('over');
+  handleFile(e.dataTransfer.files[0]);
+});
+
+// Parse button
+document.getElementById('btnParse').addEventListener('click', () => {
+  if (!S.raw) return;
+  const result = parseDXF(S.raw);
+  S.entities = result.ents;
+  // $INSUNITS が inch(1) の場合はスケール補正に25.4を自動セット
+  if (result.unitScale && result.unitScale !== 1.0) {
+    document.getElementById('scale').value = result.unitScale.toFixed(4);
+    const badge = document.getElementById('hdrBadge');
+    badge.textContent = `SCALE:${result.unitScale} (${result.unitName})`;
+    badge.className   = 'status-badge warn';
+  }
+  process();
+});
+
+// Trace button
+document.getElementById('btnTrace').addEventListener('click', () => {
+  if (!S.valid) return;
+  S.gtrace = genTrace();
+  switchTab('trace');
+  document.getElementById('btnDlTrace').disabled = false;
+});
+
+// Generate button
+document.getElementById('btnGenerate').addEventListener('click', () => {
+  if (!S.valid) return;
+  S.gcut   = genCut();
+  S.gtrace = genTrace();
+  switchTab('cut');
+  document.getElementById('btnDlCut').disabled   = false;
+  document.getElementById('btnDlTrace').disabled = false;
+});
+
+// Re-process on key param changes (removed: layerCut, zTotal, zStep, feedXY, feedZ — now per-rule)
+['layerOrigin','scale','machineX','machineY','offsetX','offsetY','splineTol'].forEach(id =>
+  document.getElementById(id).addEventListener('change', () => {
+    if (S.entities.length > 0) process();
+  })
+);
+
+// Add Rule button
+document.getElementById('btnAddRule').addEventListener('click', addRule);
+
+// Initialize rules from localStorage (or default)
+initRules();
+
+// Resize handler
+window.addEventListener('resize', () => {
+  draw(S.lines, S.bbox,
+    parseFloat(p('machineX'))||295,
+    parseFloat(p('machineY'))||400
+  );
+});
+
+// Initial canvas
+draw([], null, 295, 400);
+</script>
+</body>
+</html>
