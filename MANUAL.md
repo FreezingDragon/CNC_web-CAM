@@ -77,7 +77,7 @@ DXFファイルには最低2つのレイヤーが必要です。
 以下のURLをブラウザ（Chrome / Edge推奨）で開きます。
 
 ```
-https://freezingdragon.github.io/cnc_webcam/cnc-cam.html
+https://freezingdragon.github.io/CNC_web-CAM/cnc-cam.html
 ```
 
 またはダウンロードした`cnc-cam.html`をダブルクリックして開きます。
