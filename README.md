@@ -2,6 +2,8 @@
 
 **ブラウザで動くDXF→Gコード変換CAMツール。インストール不要。**
 
+[English](README(EN).md) | 日本語
+
 🔗 **[ツールを使う](https://freezingdragon.github.io/CNC_web-CAM/cnc-cam.html)**
 
 ---
