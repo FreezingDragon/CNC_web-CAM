@@ -1,6 +1,6 @@
 # CNC CAM ツール マニュアル
 
-**対象機械：Genmitsu 3018Pro / 3040（GRBLコントローラ）**
+**対象機械：Genmitsu 3018Pro （GRBLコントローラ）**
 **対象ソフト：VectorWorks / Illustrator / Affinity**
 
 ---
