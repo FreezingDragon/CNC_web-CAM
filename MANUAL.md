@@ -58,7 +58,7 @@ DXFファイルには最低2つのレイヤーが必要です。
 
 > ⚠️ **Affinityを使う場合**：DXF書き出し時に円がSPLINEに変換されます。ツールが自動的にSPLINEの重心を原点として検出しますが、正確な位置に円を配置してください。
 
-### 1-3. ソフト別DXF書き出し設定
+### 1-3. ソフト別DXF書き出し設定（確認済みのソフト）
 
 **VectorWorks**
 - ファイル → 書き出し → DXF/DWG
@@ -66,7 +66,7 @@ DXFファイルには最低2つのレイヤーが必要です。
 - 単位：mm
 - Illustratorを経由する必要はありません
 
-**Illustrator**
+**Adobe　Illustrator**
 - ファイル → 別名で保存 → DXF/DWG形式
 - バージョン：R14推奨
 - ⚠️ スケールが自動補正されます（$INSUNITSインチ問題）
@@ -87,7 +87,7 @@ DXFファイルには最低2つのレイヤーが必要です。
 https://freezingdragon.github.io/CNC_web-CAM/cnc-cam.html
 ```
 
-またはネットワーク内のCAMサーバー経由で開く場合：
+ネットワーク内のCAMサーバー（後述）経由で開く場合：
 
 ```
 http://cnc.local:8080/cnc-cam.html
@@ -430,11 +430,12 @@ G10 L20 P1 X0 Y0 Z0
 
 ### 6-1. システム構成
 
-CAMサーバー（server.js）をRaspberry Piに導入しCNCコントローラーとUSB（シリアル）接続することで、CNCのそばにPCを置くことが不要になります。ネットワーク内のどのPCからでもGコードをCNC機械に転送できます。
+CNCjs及びCAMサーバー（server.js）をRaspberry PiにインストールしCNCコントローラーとUSB（シリアル）接続することで、CNCのそばにPCを置くことが不要になります。ネットワーク内のどのPCからでもGコードをCNC機械に転送できます。
 
 ```
 PC / Mac（ブラウザ）
   │
+LAN接続（有線・無線）
   ├── http://[ラズパイIP]:8080/cnc-cam.html  ← CAMツール
   │         ↕（▶ CNCjsへ ボタン）
   │   http://[ラズパイIP]:8080/save          ← Gコード転送
