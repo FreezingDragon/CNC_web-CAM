@@ -111,6 +111,10 @@ M2
 
 [Replacing NCVC & Candle with a Browser-based CAM Tool](https://note.com/freezing_dragon/n/n458ccc960970?app_launch=false)
 
+## Feedback & Feature Requests
+
+Feel free to open an [Issue](https://github.com/FreezingDragon/CNC_web-CAM/issues) for bug reports, feature requests, or questions.
+
 ## License
 
 MIT License
