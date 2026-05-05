@@ -111,6 +111,9 @@ M2
 
 [CNCをブラウザで動かす：NCVC＆Candleからの完全脱却記]（[note記事URL](https://note.com/freezing_dragon/n/n458ccc960970?app_launch=false)）
 
+## フィードバック・機能リクエスト
+[Issues](https://github.com/FreezingDragon/CNC_web-CAM/issues)からお気軽にどうぞ。
+
 ## ライセンス
 
 MIT License
