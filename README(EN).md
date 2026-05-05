@@ -1,5 +1,7 @@
 # CNC CAM — DXF to G-code Converter
 
+Japanese | [English](README(EN).md)
+
 **A browser-based DXF to G-code CAM tool. No installation required.**
 
 🔗 **[Open the Tool](https://freezingdragon.github.io/CNC_web-CAM/cnc-cam.html)**
