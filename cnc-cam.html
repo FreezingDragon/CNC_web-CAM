@@ -8,15 +8,15 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+JP:wght@400;500&display=swap');
 
 :root {
-  --bg0: #12161c;
-  --bg1: #181d25;
-  --bg2: #1e2530;
-  --bg3: #262e3c;
-  --border: #2e3a4a;
-  --border2: #3a4d62;
-  --text: #e2eaf4;
-  --text2: #96aec8;
-  --text3: #6a8099;
+  --bg0: #0a0c0f;
+  --bg1: #0f1318;
+  --bg2: #161b23;
+  --bg3: #1e252f;
+  --border: #252d38;
+  --border2: #2e3a48;
+  --text: #cdd6e0;
+  --text2: #7a8fa8;
+  --text3: #445568;
   --green: #3ddc84;
   --green2: #1a5c37;
   --blue: #4da6ff;
@@ -198,6 +198,7 @@ header .subtitle {
 .btn-blue   { background: var(--blue2); color: var(--blue); border: 1px solid #2a5a8c; }
 .btn-amber  { background: var(--amber2); color: var(--amber); border: 1px solid #7a5020; }
 .btn-ghost  { background: var(--bg3); color: var(--text2); border: 1px solid var(--border2); }
+.btn-send   { background: #2a1a5c; color: #a080ff; border: 1px solid #5a3aac; }
 .btn:not(:disabled):hover { opacity: 0.8; }
 .btn-row { display: flex; gap: 5px; flex-wrap: wrap; }
 
@@ -580,6 +581,20 @@ textarea.gcode:focus { outline: none; }
       <div class="log" id="logPanel"></div>
     </div>
 
+    <!-- CONNECTION SETTINGS -->
+    <div class="section">
+      <div class="section-hd">接続設定</div>
+      <div class="pg">
+        <div class="pi wide">
+          <label>CAMサーバーURL（server.js）</label>
+          <input type="text" id="camServerUrl" value="http://cnc.local:8080"
+            style="font-size:10px;"
+            placeholder="http://cnc.local:8080">
+        </div>
+      </div>
+      <div style="margin-top:5px" class="tip">▶ CNCjsボタン送信先</div>
+    </div>
+
     <!-- SPACER -->
     <div style="flex:1"></div>
 
@@ -623,6 +638,8 @@ textarea.gcode:focus { outline: none; }
           <button class="btn btn-green" id="btnDlCut"   disabled onclick="dl('cut')">⬇ 切削.nc</button>
           <button class="btn btn-blue"  id="btnDlTrace" disabled onclick="dl('trace')">⬇ トレース.nc</button>
           <button class="btn btn-ghost" onclick="copyGcode()">⧉ コピー</button>
+          <button class="btn btn-send"  id="btnSend"    disabled onclick="sendToCNCjs()">▶ CNCjsへ</button>
+          <div id="sendMsg" style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:4px;"></div>
         </div>
       </div>
     </div>
@@ -652,7 +669,8 @@ const RULE_COLORS = ['#4da6ff','#3ddc84','#f0a030','#ff6060','#c084fc','#22d3ee'
 // ══════════════════════════════════════════════════════════════════
 // RULE MANAGEMENT
 // ══════════════════════════════════════════════════════════════════
-const STORAGE_KEY = 'cnc-cam-rules-v1';
+const STORAGE_KEY     = 'cnc-cam-rules-v1';
+const STORAGE_KEY_URL = 'cnc-cam-server-url';
 
 function newRuleId() {
   return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
@@ -778,7 +796,7 @@ function renderRules() {
       <div class="tab-sect ${r.tabs.enabled ? '' : 'disabled'}">
         <div class="tab-sect-hd">
           <input type="checkbox" id="tabchk-${r.id}" data-f="tabs.enabled" ${r.tabs.enabled ? 'checked' : ''}>
-          <label for="tabchk-${r.id}">保持タブを使う（最終パスのみ）</label>
+          <label for="tabchk-${r.id}">保持タブを使う</label>
         </div>
         <div class="pg">
           <div class="pi">
@@ -1013,6 +1031,22 @@ function process() {
     const typeNames = {'L':'LINE','C':'CIRCLE','P':'LWPOLY','S':'SPLINE'};
     const d = Object.entries(v).map(([t,n])=>`${typeNames[t]||t}×${n}`).join(', ');
     msgs.push({c:'info', m:`[${k}] ${d}`});
+  });
+
+  // 未設定レイヤー警告：ルールにも原点にも対応していないレイヤーにエンティティがある場合
+  const configuredLayers = new Set([
+    lOrig.toUpperCase(),
+    ...S.rules.filter(r => r.enabled).map(r => r.layer.toUpperCase())
+  ]);
+  const cuttableTypes = new Set(['L','P','S','C']);
+  Object.entries(lyrInfo).forEach(([k, v]) => {
+    if (!configuredLayers.has(k.toUpperCase())) {
+      const hasCuttable = Object.keys(v).some(t => cuttableTypes.has(t));
+      if (hasCuttable) {
+        msgs.push({c:'warn',
+          m:`⚠ レイヤー"${k}"は未設定です（ルールに追加するか無視してください）`});
+      }
+    }
   });
 
   // Find origin — priority: CIRCLE > SPLINE (centroid) on origin layer
@@ -1637,8 +1671,8 @@ function computeTabRanges(totalLen, count, width) {
 }
 
 // 最終パスでタブを適用しながらチェーンを切削するGコードを生成
-// chain: セグメント配列、dep: 最終深さ（正値）、fXY/fZ: 送り速度、tabs: { count, width, height }
-function emitChainWithTabs(chain, dep, fXY, fZ, tabs, msgs) {
+// chain: セグメント配列、dep: 現パス深さ（正値）、fXY/fZ: 送り速度、tabs: { count, width, height }、zTab: タブ面Z（固定値、負）
+function emitChainWithTabs(chain, dep, fXY, fZ, tabs, zTab, msgs) {
   let g = '';
   const totalLen = chainLength(chain);
 
@@ -1656,7 +1690,7 @@ function emitChainWithTabs(chain, dep, fXY, fZ, tabs, msgs) {
 
   const tabRanges = computeTabRanges(totalLen, tabs.count, tabs.width);
   const zCut = -dep;
-  const zTab = -dep + tabs.height;
+  // zTab は呼び出し元から受け取る（全パスで同じ高さ）
 
   let cumLen = 0;
   let inTab = false;
@@ -1801,9 +1835,12 @@ function genCut() {
 
     passes.forEach((dep, pi) => {
       const isFinalPass = (pi === passes.length - 1);
-      const applyTabs = useTabs && isFinalPass;
+      // タブは「現パス深さ > (総深さ - タブ高さ)」のパスに全て適用
+      const tabSurfaceDepth = Math.abs(rule.zTotal) - Math.abs(rule.tabs ? rule.tabs.height : 0);
+      const applyTabs = useTabs && dep > tabSurfaceDepth + 1e-6;
+      const zTabFixed = -(Math.abs(rule.zTotal) - Math.abs(rule.tabs ? rule.tabs.height : 0));
       g += `; -- [${rule.layer}] pass ${pi+1}/${passes.length}  Z=-${dep.toFixed(4)}`;
-      if (applyTabs) g += `  [TABS]`;
+      if (applyTabs) g += `  [TABS z=${f4(zTabFixed)}]`;
       g += `\n`;
 
       // Linear chains
@@ -1812,8 +1849,8 @@ function genCut() {
         g += `G0 X${f4(chain[0].x1)} Y${f4(chain[0].y1)}\n`;
         g += `G1 Z${f4(-dep)} F${fZ}\n`;
         if (applyTabs && isChainClosed(chain)) {
-          // 閉じたチェーンの最終パス: タブ付き切削
-          g += emitChainWithTabs(chain, dep, fXY, fZ, rule.tabs, null);
+          // 閉じたチェーン: タブ付き切削（zTabFixedを渡す）
+          g += emitChainWithTabs(chain, dep, fXY, fZ, rule.tabs, zTabFixed, null);
         } else {
           // 通常切削
           chain.forEach(seg => {
@@ -1904,6 +1941,41 @@ function switchTab(t) {
   out.value = code;
   const lines = code ? code.split('\n').length : 0;
   document.getElementById('gcodeStats').textContent = code ? `${lines} lines` : '';
+}
+
+async function sendToCNCjs() {
+  if (!S.gcut) return;
+  const base      = (S.filename||'output').replace(/\.dxf$/i,'');
+  const filename  = base + '_cut.nc';
+  const msg       = document.getElementById('sendMsg');
+  const btn       = document.getElementById('btnSend');
+  const serverUrl = (document.getElementById('camServerUrl').value || 'http://cnc.local:8080').replace(/\/+$/, '');
+
+  btn.disabled    = true;
+  msg.style.color = 'var(--text3)';
+  msg.textContent = '送信中...';
+
+  try {
+    const res  = await fetch(`${serverUrl}/save`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ filename, content: S.gcut })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      msg.style.color = 'var(--green)';
+      msg.textContent = '✓ 送信完了: ' + data.filename;
+    } else {
+      msg.style.color = 'var(--red)';
+      msg.textContent = '✗ ' + (data.error || '送信失敗');
+    }
+  } catch (e) {
+    msg.style.color = 'var(--red)';
+    msg.textContent = '✗ サーバーに接続できません: ' + serverUrl;
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => { msg.textContent = ''; }, 5000);
+  }
 }
 
 function copyGcode() {
@@ -2031,6 +2103,7 @@ document.getElementById('btnGenerate').addEventListener('click', () => {
   switchTab('cut');
   document.getElementById('btnDlCut').disabled   = false;
   document.getElementById('btnDlTrace').disabled = false;
+  document.getElementById('btnSend').disabled    = false;
 });
 
 // Re-process on key param changes (removed: layerCut, zTotal, zStep, feedXY, feedZ — now per-rule)
@@ -2045,6 +2118,15 @@ document.getElementById('btnAddRule').addEventListener('click', addRule);
 
 // Initialize rules from localStorage (or default)
 initRules();
+
+// Initialize CAM server URL from localStorage
+(function() {
+  const saved = localStorage.getItem(STORAGE_KEY_URL);
+  if (saved) document.getElementById('camServerUrl').value = saved;
+  document.getElementById('camServerUrl').addEventListener('change', function() {
+    localStorage.setItem(STORAGE_KEY_URL, this.value.trim());
+  });
+})();
 
 // Resize handler
 window.addEventListener('resize', () => {
