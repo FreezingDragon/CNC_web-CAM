@@ -1,6 +1,6 @@
 # CNC CAM — DXF to G-code Converter
 
-Japanese | [English](README(EN).md)
+[Japanese](README.md) | English
 
 **A browser-based DXF to G-code CAM tool. No installation required.**
 
