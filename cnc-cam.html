@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CNC CAM — DXF → G-code</title>
+<title>CNC CAM Ver.2.0 — DXF → G-code</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+JP:wght@400;500&display=swap');
 
@@ -453,7 +453,7 @@ textarea.gcode:focus { outline: none; }
 <body>
 
 <header>
-  <div class="title">■ DXF → G-CODE CAM</div>
+  <div class="title">■ DXF → G-CODE CAM <span style="color:var(--green)">Ver.2.0</span></div>
   <div class="subtitle">3018Pro / 3040 &nbsp;|&nbsp; 機械原点=右奥 &nbsp;|&nbsp; GRBL</div>
   <div class="status-badge" id="hdrBadge">IDLE</div>
 </header>
@@ -654,6 +654,7 @@ textarea.gcode:focus { outline: none; }
 const S = {
   raw: null, filename: null, entities: [],
   lines: [], chains: [], circles: [], origin: null, bbox: null,
+  bboxComp: null,   // tool-comp envelope (for trace boundary check)
   valid: false, gcut: '', gtrace: '',
   tab: 'cut',
   // Phase 1: layer-based rules
@@ -681,7 +682,8 @@ function defaultRule(layer = 'L1') {
     id: newRuleId(),
     layer: layer,
     op: 'profile',          // future: 'pocket', 'drill', 'counterbore'
-    toolDia: 3.0,           // 工具径（mm）。タブ幅の妥当性チェック等に使用
+    toolDia: 3.0,           // 工具径（mm）
+    toolComp: 'none',       // 工具径補正: 'none' | 'outer' | 'inner'
     zTotal: 2.0,
     zStep:  0.5,
     feedXY: 500,
@@ -714,7 +716,8 @@ function loadRules() {
       id:      r.id      || newRuleId(),
       layer:   r.layer   || 'L1',
       op:      r.op      || 'profile',
-      toolDia: Number(r.toolDia) || 3.0,    // default 3mm if missing (backward compat)
+      toolDia: Number(r.toolDia) || 3.0,
+      toolComp: r.toolComp || 'none',
       zTotal:  Number(r.zTotal)  || 2.0,
       zStep:   Number(r.zStep)   || 0.5,
       feedXY:  Number(r.feedXY)  || 500,
@@ -773,8 +776,16 @@ function renderRules() {
           </select>
         </div>
         <div class="pi wide">
-          <label>刃径 (mm) ★ タブ幅・将来の工具径補正で使用</label>
+          <label>刃径 (mm)</label>
           <input type="number" data-f="toolDia" value="${r.toolDia}" step="0.5" min="0.1">
+        </div>
+        <div class="pi wide">
+          <label>工具径補正</label>
+          <select data-f="toolComp">
+            <option value="none"  ${r.toolComp==='none' ?'selected':''}>補正なし（刃心が輪郭をなぞる）</option>
+            <option value="outer" ${r.toolComp==='outer'?'selected':''}>外側補正（外形切り抜き）</option>
+            <option value="inner" ${r.toolComp==='inner'?'selected':''}>内側補正（内側加工）</option>
+          </select>
         </div>
         <div class="pi">
           <label>総深さ (mm)</label>
@@ -973,6 +984,7 @@ function parseDXF(text) {
       cur = null;
       if (v === 'LINE')       cur = { t:'L', layer:'', x1:0,y1:0,x2:0,y2:0 };
       if (v === 'CIRCLE')     cur = { t:'C', layer:'', cx:0,cy:0,r:0 };
+      if (v === 'ARC')        cur = { t:'A', layer:'', cx:0,cy:0,r:0, a0:0, a1:0 };
       if (v === 'LWPOLYLINE') cur = { t:'P', layer:'', pts:[], closed:false, cur_x:null };
       if (v === 'SPLINE')     cur = { t:'S', layer:'', degree:3, flags:0,
                                       knots:[], ctrlPts:[], cur_x:null };
@@ -986,6 +998,10 @@ function parseDXF(text) {
       else if (c===11) cur.x2=n; else if (c===21) cur.y2=n;
     } else if (cur.t === 'C') {
       if (c===10) cur.cx=n; else if (c===20) cur.cy=n; else if (c===40) cur.r=n;
+    } else if (cur.t === 'A') {
+      // ARC: 10/20=中心, 40=半径, 50=開始角, 51=終了角（度・CCW）
+      if (c===10) cur.cx=n; else if (c===20) cur.cy=n; else if (c===40) cur.r=n;
+      else if (c===50) cur.a0=n; else if (c===51) cur.a1=n;
     } else if (cur.t === 'P') {
       if (c===70) { cur.closed = !!(parseInt(v) & 1); }
       else if (c===10) { cur.cur_x = n; }
@@ -1028,7 +1044,7 @@ function process() {
     lyrInfo[k][e.t] = (lyrInfo[k][e.t]||0) + 1;
   });
   Object.entries(lyrInfo).forEach(([k,v]) => {
-    const typeNames = {'L':'LINE','C':'CIRCLE','P':'LWPOLY','S':'SPLINE'};
+    const typeNames = {'L':'LINE','C':'CIRCLE','P':'LWPOLY','S':'SPLINE','A':'ARC'};
     const d = Object.entries(v).map(([t,n])=>`${typeNames[t]||t}×${n}`).join(', ');
     msgs.push({c:'info', m:`[${k}] ${d}`});
   });
@@ -1038,7 +1054,7 @@ function process() {
     lOrig.toUpperCase(),
     ...S.rules.filter(r => r.enabled).map(r => r.layer.toUpperCase())
   ]);
-  const cuttableTypes = new Set(['L','P','S','C']);
+  const cuttableTypes = new Set(['L','P','S','C','A']);
   Object.entries(lyrInfo).forEach(([k, v]) => {
     if (!configuredLayers.has(k.toUpperCase())) {
       const hasCuttable = Object.keys(v).some(t => cuttableTypes.has(t));
@@ -1139,6 +1155,14 @@ function process() {
       }
     }
 
+    // 工具径補正バリデーション
+    const comp = rule.toolComp || 'none';
+    if (comp !== 'none') {
+      const offset = (rule.toolDia / 2).toFixed(2);
+      msgs.push({c:'info',
+        m:`[${rule.layer}] 工具径補正: ${comp==='outer'?'外側':'内側'}  オフセット${offset}mm（刃径${rule.toolDia}mm）`});
+    }
+
     const rLines = S.entities.filter(e => e.t==='L' && e.layer.toUpperCase()===lc);
 
     const rPolys = S.entities.filter(e => e.t==='P' && e.layer.toUpperCase()===lc);
@@ -1168,11 +1192,18 @@ function process() {
       msgs.push({c:'warn', m:`[${rule.layer}] SPLINE計算エラー ${splineErrors.length}件: ${splineErrors[0]}`});
     }
 
+    // ARC → 微小直線（SPLINEと同じく生座標で分割し、後段でまとめてスケール）
+    const rArcs = S.entities.filter(e => e.t==='A' && e.layer.toUpperCase()===lc);
+    const arcSegs = [];
+    rArcs.forEach(ar => {
+      arcSegs.push(...arcToSegments(ar.cx, ar.cy, ar.r, ar.a0, ar.a1, splineTol / (sc || 1)));
+    });
+
     const rCircles = S.entities.filter(e =>
       e.t==='C' && e.layer.toUpperCase()===lc && e.r >= MIN_CIRCLE_R
     );
 
-    const totalRaw = rLines.length + polySegs.length + splineSegs.length + rCircles.length;
+    const totalRaw = rLines.length + polySegs.length + splineSegs.length + arcSegs.length + rCircles.length;
 
     if (totalRaw === 0) {
       msgs.push({c:'warn', m:`⚠ [${rule.layer}] エンティティなし`});
@@ -1188,6 +1219,7 @@ function process() {
     if (rLines.length   > 0) parts.push(`LINE×${rLines.length}`);
     if (rPolys.length   > 0) parts.push(`POLY×${rPolys.length}→${polySegs.length}segs`);
     if (rSplines.length > 0) parts.push(`SPLINE×${rSplines.length}→${splineSegs.length}segs`);
+    if (rArcs.length    > 0) parts.push(`ARC×${rArcs.length}→${arcSegs.length}segs`);
     if (rCircles.length > 0) parts.push(`CIRCLE×${rCircles.length}`);
     msgs.push({c:'ok', m:`✓ [${rule.layer}] ${parts.join(', ')}`});
 
@@ -1202,6 +1234,10 @@ function process() {
         x2:l.x2*sc-ox+ofX, y2:l.y2*sc-oy+ofY
       })),
       ...splineSegs.map(l => ({
+        x1:l.x1*sc-ox+ofX, y1:l.y1*sc-oy+ofY,
+        x2:l.x2*sc-ox+ofX, y2:l.y2*sc-oy+ofY
+      })),
+      ...arcSegs.map(l => ({
         x1:l.x1*sc-ox+ofX, y1:l.y1*sc-oy+ofY,
         x2:l.x2*sc-ox+ofX, y2:l.y2*sc-oy+ofY
       }))
@@ -1257,13 +1293,41 @@ function process() {
   msgs.push({c:'ok', m:`✓ 全体BB: X(${xmn.toFixed(1)}～${xmx.toFixed(1)}) W=${W}mm`});
   msgs.push({c:'ok', m:`         Y(${ymn.toFixed(1)}～${ymx.toFixed(1)}) H=${H}mm`});
 
-  // Machine limit check
+  // ── 工具径補正後エンベロープ（トレース/範囲確認用） ──────────────
+  // 実際に刃が通る最外周。外側補正では輪郭より刃径/2外側まで広がるため、
+  // クランプ・素材クリアランス確認はこのエンベロープで行う必要がある。
+  let exmn=Infinity,exmx=-Infinity,eymn=Infinity,eymx=-Infinity;
+  let compApplied = false;
+  enabledRules.forEach(rule => {
+    const comp = rule.toolComp || 'none';
+    if (comp !== 'none') compApplied = true;
+    (S.chainsByRule[rule.id] || []).forEach(chain => {
+      const ch = (comp !== 'none') ? applyToolComp(chain, comp, rule.toolDia) : chain;
+      ch.forEach(seg => {
+        exmn=Math.min(exmn,seg.x1,seg.x2); exmx=Math.max(exmx,seg.x1,seg.x2);
+        eymn=Math.min(eymn,seg.y1,seg.y2); eymx=Math.max(eymx,seg.y1,seg.y2);
+      });
+    });
+    (S.circlesByRule[rule.id] || []).forEach(c => {
+      const dr = comp === 'none' ? 0 : (comp === 'outer' ? rule.toolDia/2 : -rule.toolDia/2);
+      const nr = Math.max(c.r + dr, 0);
+      exmn=Math.min(exmn,c.cx-nr); exmx=Math.max(exmx,c.cx+nr);
+      eymn=Math.min(eymn,c.cy-nr); eymx=Math.max(eymx,c.cy+nr);
+    });
+  });
+  const bbComp = isFinite(exmn) ? {xmn:exmn,xmx:exmx,ymn:eymn,ymx:eymx} : bb;
+  if (compApplied) {
+    msgs.push({c:'ok', m:`✓ 補正後エンベロープ: X(${bbComp.xmn.toFixed(1)}～${bbComp.xmx.toFixed(1)}) `
+      + `W=${(bbComp.xmx-bbComp.xmn).toFixed(1)} / Y H=${(bbComp.ymx-bbComp.ymn).toFixed(1)}mm（トレースに反映）`});
+  }
+
+  // Machine limit check — 補正後エンベロープ（実際の刃の通り道）で判定
   let limOk=true;
-  if (xmn < -mX) { msgs.push({c:'err', m:`✗ X最小(${xmn.toFixed(1)}) < -${mX}`}); limOk=false; }
-  if (xmx >  mX) { msgs.push({c:'err', m:`✗ X最大(${xmx.toFixed(1)}) > +${mX}`}); limOk=false; }
-  if (ymn < -mY) { msgs.push({c:'err', m:`✗ Y最小(${ymn.toFixed(1)}) < -${mY}`}); limOk=false; }
-  if (ymx >  mY) { msgs.push({c:'err', m:`✗ Y最大(${ymx.toFixed(1)}) > +${mY}`}); limOk=false; }
-  if (limOk) msgs.push({c:'ok', m:`✓ 可動域チェック OK (${mX}×${mY}mm)`});
+  if (bbComp.xmn < -mX) { msgs.push({c:'err', m:`✗ X最小(${bbComp.xmn.toFixed(1)}) < -${mX}`}); limOk=false; }
+  if (bbComp.xmx >  mX) { msgs.push({c:'err', m:`✗ X最大(${bbComp.xmx.toFixed(1)}) > +${mX}`}); limOk=false; }
+  if (bbComp.ymn < -mY) { msgs.push({c:'err', m:`✗ Y最小(${bbComp.ymn.toFixed(1)}) < -${mY}`}); limOk=false; }
+  if (bbComp.ymx >  mY) { msgs.push({c:'err', m:`✗ Y最大(${bbComp.ymx.toFixed(1)}) > +${mY}`}); limOk=false; }
+  if (limOk) msgs.push({c:'ok', m:`✓ 可動域チェック OK (${mX}×${mY}mm${compApplied?'・補正後で判定':''})`});
 
   // Legacy aggregate fields (used by draw + trace)
   S.lines   = allSegsAggregate;
@@ -1271,6 +1335,7 @@ function process() {
   S.chains  = []; // Not used directly anymore — drawing iterates S.chainsByRule
   S.origin  = {x:ox, y:oy};
   S.bbox    = bb;
+  S.bboxComp = bbComp;
   S.valid   = limOk;
 
   setValid(limOk, msgs);
@@ -1532,6 +1597,37 @@ function splineToSegments(sp, tol) {
   return segs;
 }
 
+// ══════════════════════════════════════════════════════════════════
+// ARC / CIRCLE → 微小直線セグメント化（SPLINEと同じ公差ベース）
+// 弦の最大誤差（サジッタ）が tol 以下になる分割数を選ぶ。
+// 角度は度・反時計回り（DXF ARC 規約）。a1<=a0 のときは +360 で正方向に。
+// ══════════════════════════════════════════════════════════════════
+function arcToSegments(cx, cy, r, a0deg, a1deg, tol) {
+  if (!(r > 1e-9)) return [];
+  let sweep = a1deg - a0deg;
+  while (sweep <= 1e-9) sweep += 360;   // 正の掃引角に正規化（CCW）
+  while (sweep > 360)   sweep -= 360;
+  const a0       = a0deg * Math.PI / 180;
+  const sweepRad = sweep * Math.PI / 180;
+  // サジッタ tol を満たす最大角ステップ。tol≥r の極端なケースは粗く分割。
+  const dThetaMax = (tol > 0 && tol < r) ? 2 * Math.acos(1 - tol / r) : Math.PI / 8;
+  const n = Math.max(2, Math.ceil(sweepRad / dThetaMax));
+  const segs = [];
+  let px = cx + r * Math.cos(a0), py = cy + r * Math.sin(a0);
+  for (let i = 1; i <= n; i++) {
+    const a = a0 + sweepRad * (i / n);
+    const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
+    segs.push({ x1:px, y1:py, x2:x, y2:y });
+    px = x; py = y;
+  }
+  return segs;
+}
+
+// 円 → 閉じたチェーン（多角形近似）。タブ適用時に使用。
+function circleToChain(cx, cy, r, tol) {
+  return arcToSegments(cx, cy, r, 0, 360, tol);
+}
+
 
 // Phase 1: 端点が一致する線を連結してチェーン（一筆書き）に
 // Phase 2: チェーン間を最近傍順序で並び替え
@@ -1622,6 +1718,10 @@ function orderChains(chains) {
 
 const f4 = n => n.toFixed(4);
 
+// Gコードを完全ASCII化（Candle誤動作対策）。コメント内の日本語ファイル名・
+// レイヤー名など非ASCII文字を "_" に置換する。server.jsのサニタイズと同じ方針。
+const toAscii = s => String(s).replace(/[^\x00-\x7F]/g, '_');
+
 function buildPasses(zTotal, zStep) {
   const passes = [];
   let d = zStep;
@@ -1640,6 +1740,98 @@ function buildPasses(zTotal, zStep) {
 // ══════════════════════════════════════════════════════════════════
 
 // チェーンが閉じている（始点≒終点）か判定
+// ── 工具径補正ヘルパー ────────────────────────────────────────────
+
+function chainToVertices(chain) {
+  return chain.map(seg => ({ x: seg.x1, y: seg.y1 }));
+}
+
+function verticesToChain(vertices) {
+  const n = vertices.length;
+  return vertices.map((v, i) => ({
+    x1: v.x, y1: v.y,
+    x2: vertices[(i + 1) % n].x,
+    y2: vertices[(i + 1) % n].y
+  }));
+}
+
+// 符号付き面積（正=CCW、負=CW）
+function signedArea2D(vertices) {
+  let area = 0;
+  const n = vertices.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += vertices[i].x * vertices[j].y - vertices[j].x * vertices[i].y;
+  }
+  return area / 2;
+}
+
+// ポリゴンオフセット（マイター法）
+// distance > 0: 左法線方向（CCW多角形では内側）
+// distance < 0: 右法線方向（CCW多角形では外側）
+function offsetPolygon(vertices, distance) {
+  const n = vertices.length;
+  if (n < 3) return null;
+
+  function norm2D(v) {
+    const len = Math.sqrt(v.x * v.x + v.y * v.y);
+    return len < 1e-10 ? { x: 0, y: 0 } : { x: v.x / len, y: v.y / len };
+  }
+
+  const result = [];
+  for (let i = 0; i < n; i++) {
+    const prev = vertices[(i - 1 + n) % n];
+    const curr = vertices[i];
+    const next = vertices[(i + 1) % n];
+
+    const d1 = norm2D({ x: curr.x - prev.x, y: curr.y - prev.y });
+    const d2 = norm2D({ x: next.x - curr.x, y: next.y - curr.y });
+
+    // 各辺の左法線
+    const n1 = { x: -d1.y, y: d1.x };
+    const n2 = { x: -d2.y, y: d2.x };
+
+    // マイター方向（2つの法線の二等分）
+    const miter = norm2D({ x: n1.x + n2.x, y: n1.y + n2.y });
+
+    if (miter.x === 0 && miter.y === 0) {
+      // 180°反転：法線方向にそのままオフセット
+      result.push({ x: curr.x + n1.x * distance, y: curr.y + n1.y * distance });
+      continue;
+    }
+
+    const dot = miter.x * n1.x + miter.y * n1.y;
+    const scale = Math.abs(dot) > 0.001 ? 1.0 / dot : 0;
+    // 鋭角スパイク防止：3倍でキャップ
+    const capped = Math.sign(scale) * Math.min(Math.abs(scale), 3.0);
+
+    result.push({
+      x: curr.x + miter.x * distance * capped,
+      y: curr.y + miter.y * distance * capped
+    });
+  }
+  return result;
+}
+
+// チェーンに工具径補正を適用
+// comp: 'outer' | 'inner'、toolDia: 刃径(mm)
+function applyToolComp(chain, comp, toolDia) {
+  if (!isChainClosed(chain)) return chain; // 開いたチェーンはスキップ
+  const verts = chainToVertices(chain);
+  const area  = signedArea2D(verts);
+  if (Math.abs(area) < 1e-6) return chain; // 面積0は処理不可
+
+  // CCW(area>0)多角形で外側補正: 左法線は内向き→逆向きに動かす→distance<0
+  // CW(area<0)多角形で外側補正: 左法線は外向き→distance>0
+  const dir  = comp === 'outer' ? -Math.sign(area) : Math.sign(area);
+  const dist = dir * (toolDia / 2);
+
+  const offset = offsetPolygon(verts, dist);
+  return offset ? verticesToChain(offset) : chain;
+}
+
+// ── ここまで工具径補正ヘルパー ───────────────────────────────────
+
 function isChainClosed(chain, tol = 0.001) {
   if (!chain || chain.length === 0) return false;
   const last = chain[chain.length - 1];
@@ -1748,6 +1940,7 @@ function genCut() {
   const wu  = parseFloat(p('spindleWarmup'));
   const ofX = parseFloat(p('offsetX')) || 0;
   const ofY = parseFloat(p('offsetY')) || 0;
+  const splineTol = parseFloat(p('splineTol')) || 0.05;  // 円タブの多角形化公差(mm)
   const fn  = S.filename || 'unknown.dxf';
   const now = new Date().toLocaleString('ja-JP');
 
@@ -1766,7 +1959,7 @@ function genCut() {
   });
 
   let g = '';
-  g += `; === CNC CAM - CUTTING (multi-rule) ===\n`;
+  g += `; === CNC CAM Ver.2.0 - CUTTING (multi-rule) ===\n`;
   g += `; File    : ${fn}\n`;
   g += `; Rules   : ${enabledRules.length} active\n`;
   g += `; Spindle : S${rpm}  Warmup : ${wu}s\n`;
@@ -1828,8 +2021,27 @@ function genCut() {
       g += `\n`;
       g += `;   Tab-eligible chains: ${closedChains.length} closed`;
       if (openChains > 0) g += ` (${openChains} open chains: tabs not applied)`;
-      if (circles.length > 0) g += `, ${circles.length} circles (tabs N/A in Phase 2.0)`;
+      if (circles.length > 0) g += `, ${circles.length} circles (tabs via polygonization)`;
       g += `\n`;
+    }
+
+    // 工具径補正の適用
+    const comp = rule.toolComp || 'none';
+    let processedChains  = chains;
+    let processedCircles = circles;
+    if (comp !== 'none') {
+      const offset = (rule.toolDia / 2).toFixed(3);
+      g += `;   ToolComp: ${comp}  offset=${comp==='outer'?'+':'-'}${offset}mm\n`;
+      processedChains = chains.map(chain => applyToolComp(chain, comp, rule.toolDia));
+      processedCircles = circles.map(circ => {
+        const dr = comp === 'outer' ? rule.toolDia / 2 : -(rule.toolDia / 2);
+        const newR = circ.r + dr;
+        if (newR <= 1e-4) return null; // 円が消失
+        return { ...circ, r: newR };
+      }).filter(Boolean);
+      if (processedCircles.length < circles.length) {
+        g += `;   WARNING: ${circles.length - processedCircles.length} circle(s) vanished after inner comp\n`;
+      }
     }
     g += `; ════════════════════════════════════════\n`;
 
@@ -1843,28 +2055,36 @@ function genCut() {
       if (applyTabs) g += `  [TABS z=${f4(zTabFixed)}]`;
       g += `\n`;
 
-      // Linear chains
-      chains.forEach(chain => {
+      // Linear chains（補正済みチェーンを使用）
+      processedChains.forEach(chain => {
         g += `G0 Z${f4(zS)}\n`;
         g += `G0 X${f4(chain[0].x1)} Y${f4(chain[0].y1)}\n`;
         g += `G1 Z${f4(-dep)} F${fZ}\n`;
         if (applyTabs && isChainClosed(chain)) {
-          // 閉じたチェーン: タブ付き切削（zTabFixedを渡す）
           g += emitChainWithTabs(chain, dep, fXY, fZ, rule.tabs, zTabFixed, null);
         } else {
-          // 通常切削
           chain.forEach(seg => {
             g += `G1 X${f4(seg.x2)} Y${f4(seg.y2)} F${fXY}\n`;
           });
         }
       });
-      // Circles (G2 full arc) — Phase 2.0時点ではタブ未対応
-      circles.forEach(circ => {
-        const ex = circ.cx + circ.r; // entry at 3 o'clock
-        g += `G0 Z${f4(zS)}\n`;
-        g += `G0 X${f4(ex)} Y${f4(circ.cy)}\n`;
-        g += `G1 Z${f4(-dep)} F${fZ}\n`;
-        g += `G2 X${f4(ex)} Y${f4(circ.cy)} I${f4(-circ.r)} J${f4(0)} F${fXY}\n`;
+      // Circles（補正済み半径を使用）
+      processedCircles.forEach(circ => {
+        if (applyTabs) {
+          // タブ適用パス: 円を多角形チェーン化して保持タブを残す（部材飛散防止）
+          const ring = circleToChain(circ.cx, circ.cy, circ.r, splineTol);
+          g += `G0 Z${f4(zS)}\n`;
+          g += `G0 X${f4(ring[0].x1)} Y${f4(ring[0].y1)}\n`;
+          g += `G1 Z${f4(-dep)} F${fZ}\n`;
+          g += emitChainWithTabs(ring, dep, fXY, fZ, rule.tabs, zTabFixed, null);
+        } else {
+          // 通常パス: 真円弧(G2)で出力（コンパクト・高精度）
+          const ex = circ.cx + circ.r;
+          g += `G0 Z${f4(zS)}\n`;
+          g += `G0 X${f4(ex)} Y${f4(circ.cy)}\n`;
+          g += `G1 Z${f4(-dep)} F${fZ}\n`;
+          g += `G2 X${f4(ex)} Y${f4(circ.cy)} I${f4(-circ.r)} J${f4(0)} F${fXY}\n`;
+        }
       });
       g += `;\n`;
     });
@@ -1878,7 +2098,7 @@ function genCut() {
   g += `G0 Z${f4(zF)}\n`;
   g += `G0 X0.0 Y0.0\n`;
   g += `M2\n`;
-  return g;
+  return toAscii(g);
 }
 
 function genTrace() {
@@ -1893,11 +2113,14 @@ function genTrace() {
   const ofY = parseFloat(p('offsetY')) || 0;
   const fn  = S.filename || 'unknown.dxf';
   const now = new Date().toLocaleString('ja-JP');
-  const b   = S.bbox;
+  // 工具径補正後エンベロープを使用（実際に刃が通る最外周＝クランプ確認に必要）
+  const b   = S.bboxComp || S.bbox;
+  const compApplied = enabledRules.some(r => (r.toolComp||'none') !== 'none');
 
   let g = '';
-  g += `; === CNC CAM - TRACE (boundary check) ===\n`;
+  g += `; === CNC CAM Ver.2.0 - TRACE (boundary check) ===\n`;
   g += `; File   : ${fn}\n`;
+  g += `; Envelope: ${compApplied ? 'tool-comp applied (actual cutter path)' : 'nominal outline (no tool-comp)'}\n`;
   g += `; BB X   : ${f4(b.xmn)} to ${f4(b.xmx)}  W=${(b.xmx-b.xmn).toFixed(2)}mm\n`;
   g += `; BB Y   : ${f4(b.ymn)} to ${f4(b.ymx)}  H=${(b.ymx-b.ymn).toFixed(2)}mm\n`;
   g += `; Offset : X${ofX>=0?'+':''}${ofX} Y${ofY>=0?'+':''}${ofY} mm\n`;
@@ -1924,7 +2147,7 @@ function genTrace() {
   g += `G0 Z${f4(zF)}\n`;
   g += `G0 X0.0 Y0.0\n`;
   g += `M2\n`;
-  return g;
+  return toAscii(g);
 }
 
 // ══════════════════════════════════════════════════════════════════
