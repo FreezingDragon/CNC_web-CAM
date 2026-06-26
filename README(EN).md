@@ -4,6 +4,8 @@
 
 **A browser-based DXF to G-code CAM tool. No installation required.**
 
+`Ver.2.0`
+
 🔗 **[Open the Tool](https://freezingdragon.github.io/CNC_web-CAM/cnc-cam.html)**
 
 ---
@@ -14,26 +16,37 @@ A lightweight CAM tool optimized for Genmitsu 3018Pro / 3040 (GRBL). Compatible 
 
 Drop a DXF file into the browser and generate cutting G-code instantly. No server, no installation — runs entirely as a single HTML file.
 
+## What's New in Ver.2.0
+
+- **ARC entity support** — Standalone ARC (arc) entities are now imported. They are linearized at the same tolerance as SPLINE and flow through chain optimization, tool compensation, and tabs (previous versions silently dropped ARCs).
+- **Trace reflects tool compensation** — The range-check trace now follows the actual cutter envelope (compensated outline), so you can verify clamp clearance including the cutter overhang from outside compensation. The travel-limit check also uses the compensated envelope.
+- **Tabs on CIRCLE cutouts** — Holding tabs can now be applied to circular profile cutouts (via polygonal approximation), preventing circular parts from flying loose.
+- **Fully ASCII G-code** — Even when Japanese filenames or layer names appear in comments, the output G-code is normalized to pure ASCII (prevents Candle malfunctions).
+
 ## Features
 
 - **Direct DXF import** — Supports VectorWorks, Illustrator, and Affinity
 - **SPLINE support** — High-accuracy NURBS linearization via De Boor algorithm
+- **ARC support** — Arc entities linearized by tolerance (Ver.2.0)
 - **Toolpath chain optimization** — Automatically joins connected segments to minimize Z plunges (up to 70% reduction in machining time)
 - **G2 arc output** — Converts CIRCLE entities to arc G-code
+- **Tool radius compensation** — Outer/inner offset (miter method) for dimensionally accurate profile cutouts
 - **Work offset** — Shift the entire toolpath to any position
-- **Bounding box trace** — Generates a separate dry-run G-code file for range verification before cutting
+- **Bounding box trace** — Generates a separate dry-run G-code file for range verification (reflects tool compensation)
 - **2.5D support** — Multiple layers with different cutting depths (multi-pass 2.5D machining)
-- **Tab support** — Set tabs on any layer for profile cutout operations
-- **Travel limit validation** — Alerts when toolpath exceeds configured machine travel
+- **Holding tabs** — Set tabs on any layer to prevent parts from flying loose during cutout (closed LINE/POLYLINE/SPLINE/ARC chains, plus CIRCLE as of Ver.2.0)
+- **Fully ASCII output** — G-code normalized to ASCII to prevent Candle malfunctions
+- **Travel limit validation** — Alerts when the toolpath exceeds configured machine travel (evaluated on the compensated envelope)
 
 ## Supported DXF Entities
 
 | Entity | Support | Notes |
 |---|---|---|
 | LINE | ✅ | |
-| LWPOLYLINE | ✅ | Vertices automatically decomposed |
+| LWPOLYLINE | ✅ | Vertices automatically decomposed (bulge/arc segments not yet supported) |
 | SPLINE (degree-3 NURBS) | ✅ | Linearized via De Boor algorithm |
-| CIRCLE | ✅ | Output as G2 arc |
+| ARC | ✅ | Linearized by tolerance (added in Ver.2.0) |
+| CIRCLE | ✅ | Output as G2 arc / polygonal approximation when tabs are applied |
 
 ## Supported DXF Software
 
@@ -47,7 +60,7 @@ Drop a DXF file into the browser and generate cutting G-code instantly. No serve
 
 1. **[Open the tool](https://freezingdragon.github.io/CNC_web-CAM/cnc-cam.html)**
 2. Drag and drop your DXF file onto the drop zone
-3. Configure layer names and cutting parameters
+3. Configure layer names, cutting parameters, tool compensation, and tabs
 4. Click **◈ Parse** to load the DXF
 5. Click **⬜ Trace** to generate a dry-run G-code for range verification
 6. Click **⚙ Generate G-code** to create the cutting G-code
@@ -57,8 +70,20 @@ Drop a DXF file into the browser and generate cutting G-code instantly. No serve
 
 | Layer | Purpose | Geometry |
 |---|---|---|
-| Cut layer (default: `L1`) | Cutting path | LINE / LWPOLYLINE / SPLINE / CIRCLE |
+| Cut layer (default: `L1`) | Cutting path | LINE / LWPOLYLINE / SPLINE / ARC / CIRCLE |
 | Origin layer (default: `ORIGEN`) | Work origin definition | CIRCLE (exactly one) or SPLINE |
+
+## Tool Radius Compensation
+
+Offsets the toolpath by the cutter radius so contours are cut to their drawn dimensions. Applied to closed chains and CIRCLE entities.
+
+| Mode | Behavior | Use case |
+|---|---|---|
+| None | Cutter center traces the outline | Engraving / legacy behavior |
+| Outer | Offset outward by tool dia / 2 | Profile cutout (true size) |
+| Inner | Offset inward by tool dia / 2 | Inner pocket cutout (true size) |
+
+> Open paths (e.g. engraving lines) are not compensated.
 
 ## Generated G-code Structure
 
@@ -80,6 +105,8 @@ G0 X0 Y0
 M2
 ```
 
+> All G-code is emitted as pure ASCII. Non-ASCII filenames/layer names in comments are replaced with underscores (prevents Candle malfunctions).
+
 ## Parameters
 
 | Parameter | Default | Description |
@@ -91,7 +118,8 @@ M2
 | Safe height | 5.0mm | Retract height between moves |
 | Final retract | 30.0mm | Retract height at end of program |
 | Spindle S value | 10000 | RPM reference ($30) |
-| SPLINE tolerance | 0.05mm | Linearization accuracy for curves |
+| SPLINE tolerance | 0.05mm | Linearization accuracy for curves (also applies to ARC and circle tabs) |
+| Tool compensation | None | None / Outer / Inner |
 | X/Y offset | 0mm | Work positioning offset |
 | Scale correction | 1.0 | Auto-detected for Illustrator inch export |
 
@@ -106,6 +134,17 @@ M2
 - Genmitsu 3018Pro / 3040
 - Any CNC router running GRBL
 - Machine home position: right-rear (X+/Y+ limit switches)
+
+## Changelog
+
+### Ver.2.0
+- ARC entity support (previously dropped silently)
+- Trace and travel-limit check now reflect the tool-compensated envelope
+- Holding tabs applied to CIRCLE cutouts
+- Fully ASCII G-code (handles Japanese filenames/layer names)
+
+### Ver.1.x
+- DXF import (LINE/LWPOLYLINE/SPLINE/CIRCLE), chain optimization, 2.5D, holding tabs, tool radius compensation, networking (CNCjs integration)
 
 ## Related Article
 
